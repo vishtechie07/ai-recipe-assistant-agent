@@ -87,7 +87,6 @@ Desktop.ini
 # Application specific
 application-local.properties
 application-dev.properties
-application-prod.properties
 
 # API Keys and sensitive data
 .env
