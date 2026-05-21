@@ -3,6 +3,7 @@ package com.recipeassistant.controller;
 import com.recipeassistant.model.RecipeRequest;
 import com.recipeassistant.model.RecipeResponse;
 import com.recipeassistant.service.OpenAIService;
+import com.recipeassistant.service.OpenAiKeyService;
 import com.recipeassistant.service.SecurityAuditService;
 import com.recipeassistant.service.EncryptionService;
 import com.recipeassistant.service.DatabaseService;
@@ -33,10 +34,17 @@ public class RecipeController {
     @Autowired
     private DatabaseService databaseService;
 
+    @Autowired
+    private OpenAiKeyService openAiKeyService;
+
     @GetMapping("/")
     public String index(Model model, HttpSession session) {
         model.addAttribute("recipeRequest", new RecipeRequest());
-        model.addAttribute("hasApiKey", session.getAttribute("openai_api_key") != null);
+        model.addAttribute("hasApiKey", openAiKeyService.hasUserKey(session));
+        model.addAttribute("defaultKeyAvailable", openAiKeyService.isDefaultKeyConfigured());
+        model.addAttribute("defaultTrialsRemaining", openAiKeyService.getDefaultTrialsRemaining(session));
+        model.addAttribute("defaultRecipesMax", openAiKeyService.getMaxDefaultRecipesPerSession());
+        model.addAttribute("defaultRecipesUsed", openAiKeyService.getDefaultRecipesUsed(session));
         return "index";
     }
 
@@ -58,7 +66,7 @@ public class RecipeController {
             if (testResult != null) {
                 // Encrypt and store API key securely
                 String encryptedApiKey = encryptionService.encrypt(request.getApiKey());
-                session.setAttribute("encrypted_openai_api_key", encryptedApiKey);
+                session.setAttribute(OpenAiKeyService.SESSION_USER_KEY, encryptedApiKey);
                 session.setAttribute("api_key_set_time", System.currentTimeMillis());
                 
                 // Log successful API key setup (without exposing the key)
@@ -79,7 +87,7 @@ public class RecipeController {
     @PostMapping("/clear-api-key")
     @ResponseBody
     public RecipeResponse clearApiKey(HttpSession session) {
-        session.removeAttribute("encrypted_openai_api_key");
+        session.removeAttribute(OpenAiKeyService.SESSION_USER_KEY);
         session.removeAttribute("api_key_set_time");
         return new RecipeResponse(true, "API key cleared successfully!", null);
     }
@@ -87,12 +95,34 @@ public class RecipeController {
     @GetMapping("/api-key-status")
     @ResponseBody
     public RecipeResponse getApiKeyStatus(HttpSession session) {
-        String encryptedApiKey = (String) session.getAttribute("encrypted_openai_api_key");
-        if (encryptedApiKey != null) {
-            return new RecipeResponse(true, "API key is set and encrypted", null);
-        } else {
-            return new RecipeResponse(false, null, "No API key set");
+        RecipeResponse response = new RecipeResponse();
+        boolean hasUserKey = openAiKeyService.hasUserKey(session);
+        populateTrialFields(response, session);
+        response.setHasUserKey(hasUserKey);
+
+        if (hasUserKey) {
+            response.setSuccess(true);
+            response.setContent("Your API key is set. Unlimited recipe generation.");
+            response.setKeySource("user");
+            return response;
         }
+
+        if (openAiKeyService.isDefaultKeyConfigured()) {
+            int remaining = openAiKeyService.getDefaultTrialsRemaining(session);
+            response.setKeySource("default");
+            if (remaining > 0) {
+                response.setSuccess(true);
+                response.setContent("Free trial: " + remaining + " recipe(s) remaining. Add your key for unlimited use.");
+            } else {
+                response.setSuccess(false);
+                response.setError("Free trial used up for this session. Add your OpenAI API key to continue.");
+            }
+            return response;
+        }
+
+        response.setSuccess(false);
+        response.setError("No API key configured. Add your OpenAI API key to generate recipes.");
+        return response;
     }
 
     @PostMapping("/generate-recipe")
@@ -112,23 +142,27 @@ public class RecipeController {
                 .body(new RecipeResponse(false, null, errorMessage));
         }
         
-        String encryptedApiKey = (String) session.getAttribute("encrypted_openai_api_key");
-        if (encryptedApiKey == null) {
-            return ResponseEntity.status(401)
-                .body(new RecipeResponse(false, null, "Please set your OpenAI API key first."));
-        }
-        
-        // Decrypt the API key
-        String apiKey = encryptionService.decrypt(encryptedApiKey);
-        if (apiKey == null) {
-            return ResponseEntity.status(401)
-                .body(new RecipeResponse(false, null, "Error decrypting API key. Please set it again."));
+        OpenAiKeyService.ResolvedKey resolved = openAiKeyService.resolveKey(session, encryptionService, true);
+        if (!resolved.isValid()) {
+            int status = openAiKeyService.isDefaultKeyConfigured() && !openAiKeyService.hasUserKey(session)
+                && openAiKeyService.getDefaultTrialsRemaining(session) == 0 ? 429 : 401;
+            RecipeResponse body = new RecipeResponse(false, null, resolved.getErrorMessage());
+            populateTrialFields(body, session);
+            return ResponseEntity.status(status).body(body);
         }
 
         try {
-            String recipe = openAIService.generateRecipe(apiKey, request.getIngredients(), request.getCuisine(), request.getDietaryRestrictions());
+            String recipe = openAIService.generateRecipe(
+                resolved.getApiKey(), request.getIngredients(), request.getCuisine(), request.getDietaryRestrictions());
+            if (resolved.isIncrementTrialOnSuccess()) {
+                openAiKeyService.incrementDefaultRecipeCount(session);
+            }
             securityAuditService.logRecipeGeneration(getClientIpAddress(httpRequest), request.getIngredients());
-            return ResponseEntity.ok(new RecipeResponse(true, recipe, null));
+            RecipeResponse body = new RecipeResponse(true, recipe, null);
+            body.setKeySource(resolved.getSource().name().toLowerCase());
+            body.setHasUserKey(openAiKeyService.hasUserKey(session));
+            populateTrialFields(body, session);
+            return ResponseEntity.ok(body);
         } catch (Exception e) {
             return ResponseEntity.internalServerError()
                 .body(new RecipeResponse(false, null, "Error generating recipe: " + e.getMessage()));
@@ -151,21 +185,16 @@ public class RecipeController {
                 .body(new RecipeResponse(false, null, errorMessage));
         }
         
-        String encryptedApiKey = (String) session.getAttribute("encrypted_openai_api_key");
-        if (encryptedApiKey == null) {
-            return ResponseEntity.status(401)
-                .body(new RecipeResponse(false, null, "Please set your OpenAI API key first."));
-        }
-        
-        // Decrypt the API key
-        String apiKey = encryptionService.decrypt(encryptedApiKey);
-        if (apiKey == null) {
-            return ResponseEntity.status(401)
-                .body(new RecipeResponse(false, null, "Error decrypting API key. Please set it again."));
+        OpenAiKeyService.ResolvedKey resolved = openAiKeyService.resolveKey(session, encryptionService, false);
+        if (!resolved.isValid()) {
+            int status = openAiKeyService.isDefaultKeyConfigured() && !openAiKeyService.hasUserKey(session)
+                && openAiKeyService.getDefaultTrialsRemaining(session) == 0 ? 429 : 401;
+            return ResponseEntity.status(status)
+                .body(new RecipeResponse(false, null, resolved.getErrorMessage()));
         }
 
         try {
-            String tips = openAIService.getCookingTips(apiKey, request.getIngredients());
+            String tips = openAIService.getCookingTips(resolved.getApiKey(), request.getIngredients());
             return ResponseEntity.ok(new RecipeResponse(true, tips, null));
         } catch (Exception e) {
             return ResponseEntity.internalServerError()
@@ -186,6 +215,13 @@ public class RecipeController {
         }
     }
     
+    private void populateTrialFields(RecipeResponse response, HttpSession session) {
+        response.setDefaultKeyAvailable(openAiKeyService.isDefaultKeyConfigured());
+        response.setDefaultTrialsRemaining(openAiKeyService.getDefaultTrialsRemaining(session));
+        response.setDefaultRecipesMax(openAiKeyService.getMaxDefaultRecipesPerSession());
+        response.setDefaultRecipesUsed(openAiKeyService.getDefaultRecipesUsed(session));
+    }
+
     private String getClientIpAddress(HttpServletRequest request) {
         String xForwardedFor = request.getHeader("X-Forwarded-For");
         if (xForwardedFor != null && !xForwardedFor.isEmpty() && !"unknown".equalsIgnoreCase(xForwardedFor)) {

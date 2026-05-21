@@ -236,6 +236,8 @@ done
 
 ## 🚀 Deployment
 
+**Do not deploy this app to Vercel.** Vercel does not run Java/Spring Boot (it targets static sites and serverless runtimes like Node/Python/Go). Deploy to a Java-friendly platform instead (see below).
+
 ### Development
 ```bash
 mvn spring-boot:run
@@ -254,6 +256,11 @@ COPY target/food-recipe-recommendation-agent-1.0.0.jar app.jar
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app.jar"]
 ```
+
+### Where to deploy (Java-friendly)
+- **Railway / Render / Fly.io**: Connect repo, set build to `mvn clean package` and start command to `java -jar target/food-recipe-recommendation-agent-1.0.0.jar`; add PostgreSQL and env vars.
+- **AWS / GCP / Azure**: Run the JAR on EC2/App Engine/App Service, or use container (ECS/EKS, Cloud Run, AKS).
+- **Heroku**: Supports Java; use `Procfile` with `web: java -jar target/food-recipe-recommendation-agent-1.0.0.jar` (after `mvn clean package` in buildpack).
 
 ## 🔒 Security Features
 
