@@ -371,6 +371,18 @@
     </footer>
 
     <script>
+        function escapeHtml(text) {
+            if (text == null) return '';
+            const div = document.createElement('div');
+            div.textContent = String(text);
+            return div.innerHTML;
+        }
+
+        function getCsrfToken() {
+            const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+            return match ? decodeURIComponent(match[1]) : '';
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             const apiKeyInput = document.getElementById('apiKey');
             const setApiKeyBtn = document.getElementById('setApiKeyBtn');
@@ -504,26 +516,33 @@
                 errorMessage.textContent = message;
             }
 
-            function showTrialGenerationNotice(result) {
-                if (!result || result.keySource !== 'default') return '';
+            function appendTrialNotice(container, result) {
+                if (!result || result.keySource !== 'default') return;
                 const used = result.defaultRecipesUsed ?? 0;
                 const max = result.defaultRecipesMax ?? 5;
                 const remaining = result.defaultTrialsRemaining ?? 0;
-                return `
-                    <div class="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-sm">
-                        <i class="fas fa-chart-pie mr-2"></i>
-                        <strong>Shared trial key:</strong> ${used} of ${max} recipes used this session
-                        (${remaining} remaining). Add your own key for unlimited recipes.
-                    </div>`;
+                const notice = document.createElement('div');
+                notice.className = 'mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-sm';
+                notice.textContent =
+                    `Shared trial key: ${used} of ${max} recipes used this session (${remaining} remaining). Add your own key for unlimited recipes.`;
+                container.appendChild(notice);
             }
 
             function showResults(content, result) {
-                results.innerHTML = `
-                    ${showTrialGenerationNotice(result)}
-                    <div class="prose max-w-none">
-                        <div class="whitespace-pre-wrap text-gray-800 leading-relaxed">${content}</div>
-                    </div>
-                    <div class="mt-6 flex space-x-4">
+                results.replaceChildren();
+                appendTrialNotice(results, result);
+
+                const prose = document.createElement('div');
+                prose.className = 'prose max-w-none';
+                const textDiv = document.createElement('div');
+                textDiv.className = 'whitespace-pre-wrap text-gray-800 leading-relaxed';
+                textDiv.textContent = content ?? '';
+                prose.appendChild(textDiv);
+                results.appendChild(prose);
+
+                const actions = document.createElement('div');
+                actions.className = 'mt-6 flex space-x-4';
+                actions.innerHTML = `
                         <button onclick="printRecipe()" class="bg-primary-600 hover:bg-primary-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-200">
                             <i class="fas fa-print mr-2"></i>Print Recipe
                         </button>
@@ -532,9 +551,8 @@
                         </button>
                         <button id="favoriteBtn" onclick="toggleFavorite()" class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-200">
                             <i class="fas fa-heart mr-2"></i>Save to Favorites
-                        </button>
-                    </div>
-                `;
+                        </button>`;
+                results.appendChild(actions);
             }
 
             // Make showResults globally accessible
@@ -931,11 +949,14 @@
 
             async function makeRequest(endpoint, data) {
                 try {
+                    const headers = { 'Content-Type': 'application/json' };
+                    const csrfToken = getCsrfToken();
+                    if (csrfToken) {
+                        headers['X-XSRF-TOKEN'] = csrfToken;
+                    }
                     const response = await fetch(endpoint, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
+                        headers: headers,
                         body: JSON.stringify(data),
                         credentials: 'same-origin'
                     });
@@ -1083,7 +1104,7 @@
                         const title = line.replace(/^(recipe|recipe name):\s*/i, '').trim();
                         formattedHTML += `
                             <div class="recipe-header">
-                                <h1 class="recipe-title">${title}</h1>
+                                <h1 class="recipe-title">${escapeHtml(title)}</h1>
                             </div>
                         `;
                         continue;
@@ -1096,7 +1117,7 @@
                             <div class="recipe-meta">
                                 <div class="meta-item">
                                     <div class="meta-label">Preparation Time</div>
-                                    <div class="meta-value">${time}</div>
+                                    <div class="meta-value">${escapeHtml(time)}</div>
                                 </div>
                         `;
                         continue;
@@ -1108,7 +1129,7 @@
                         formattedHTML += `
                                 <div class="meta-item">
                                     <div class="meta-label">Cooking Time</div>
-                                    <div class="meta-value">${time}</div>
+                                    <div class="meta-value">${escapeHtml(time)}</div>
                                 </div>
                         `;
                         continue;
@@ -1120,7 +1141,7 @@
                         formattedHTML += `
                                 <div class="meta-item">
                                     <div class="meta-label">Servings</div>
-                                    <div class="meta-value">${servings}</div>
+                                    <div class="meta-value">${escapeHtml(servings)}</div>
                                 </div>
                             </div>
                         `;
@@ -1200,7 +1221,7 @@
                             line.toLowerCase().includes('however') ||
                             line.length > 100) {
                             // This is a general message, not specific nutrition facts
-                            formattedHTML += `<p class="nutrition-message">${line}</p>`;
+                            formattedHTML += `<p class="nutrition-message">${escapeHtml(line)}</p>`;
                             continue;
                         }
                         
@@ -1210,8 +1231,8 @@
                             if (label && value) {
                                 formattedHTML += `
                                     <div class="nutrition-item">
-                                        <div class="nutrition-value">${value}</div>
-                                        <div class="nutrition-label">${label}</div>
+                                        <div class="nutrition-value">${escapeHtml(value)}</div>
+                                        <div class="nutrition-label">${escapeHtml(label)}</div>
                                     </div>
                                 `;
                             }
@@ -1224,8 +1245,8 @@
                                     if (label && value) {
                                         formattedHTML += `
                                             <div class="nutrition-item">
-                                                <div class="nutrition-value">${value}</div>
-                                                <div class="nutrition-label">${label}</div>
+                                                <div class="nutrition-value">${escapeHtml(value)}</div>
+                                                <div class="nutrition-label">${escapeHtml(label)}</div>
                                             </div>
                                         `;
                                     }
@@ -1242,8 +1263,8 @@
                                         if (label && value) {
                                             formattedHTML += `
                                                 <div class="nutrition-item">
-                                                    <div class="nutrition-value">${value}</div>
-                                                    <div class="nutrition-label">${label}</div>
+                                                    <div class="nutrition-value">${escapeHtml(value)}</div>
+                                                    <div class="nutrition-label">${escapeHtml(label)}</div>
                                                 </div>
                                             `;
                                         }
@@ -1252,7 +1273,7 @@
                             }
                         } else {
                             // Fallback: treat as general nutrition message
-                            formattedHTML += `<p class="nutrition-message">${line}</p>`;
+                            formattedHTML += `<p class="nutrition-message">${escapeHtml(line)}</p>`;
                         }
                         continue;
                     }
@@ -1260,13 +1281,13 @@
                     // Handle regular text (fallback)
                     if (line && !line.match(/^(recipe|ingredients|instructions|cooking tips|nutritional information):/i)) {
                         if (currentSection === 'ingredients') {
-                            formattedHTML += `<li>${line}</li>`;
+                            formattedHTML += `<li>${escapeHtml(line)}</li>`;
                         } else if (currentSection === 'instructions') {
-                            formattedHTML += `<li>${line}</li>`;
+                            formattedHTML += `<li>${escapeHtml(line)}</li>`;
                         } else if (currentSection === 'tips') {
-                            formattedHTML += `<li>${line}</li>`;
+                            formattedHTML += `<li>${escapeHtml(line)}</li>`;
                         } else {
-                            formattedHTML += `<p>${line}</p>`;
+                            formattedHTML += `<p>${escapeHtml(line)}</p>`;
                         }
                     }
                 }
@@ -1369,35 +1390,54 @@
                 }
 
                 emptyFavorites.classList.add('hidden');
-                favoritesList.innerHTML = favorites.map(recipe => `
-                    <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                        <div class="flex justify-between items-start mb-3">
-                            <h3 class="text-lg font-semibold text-gray-900">${recipe.title}</h3>
-                            <div class="flex space-x-2">
-                                <button onclick="loadFavoriteRecipe('${recipe.id}')" 
-                                        class="text-primary-600 hover:text-primary-800 font-medium text-sm">
-                                    <i class="fas fa-eye mr-1"></i>View
-                                </button>
-                                <button onclick="removeFavorite('${recipe.id}')" 
-                                        class="text-red-600 hover:text-red-800 font-medium text-sm">
-                                    <i class="fas fa-trash mr-1"></i>Remove
-                                </button>
-                            </div>
-                        </div>
-                        <div class="text-sm text-gray-600 mb-2">
-                            <span class="font-medium">Ingredients:</span> ${recipe.ingredients || 'Not specified'}
-                        </div>
-                        <div class="text-sm text-gray-600 mb-2">
-                            <span class="font-medium">Cuisine:</span> ${recipe.cuisine || 'Any'}
-                        </div>
-                        <div class="text-sm text-gray-600 mb-2">
-                            <span class="font-medium">Saved:</span> ${new Date(recipe.timestamp).toLocaleDateString()}
-                        </div>
-                        <div class="text-xs text-gray-500">
-                            ${recipe.content.substring(0, 150)}...
-                        </div>
-                    </div>
-                `).join('');
+                favorites.forEach(recipe => {
+                    const card = document.createElement('div');
+                    card.className = 'bg-gray-50 rounded-lg p-4 border border-gray-200';
+
+                    const header = document.createElement('div');
+                    header.className = 'flex justify-between items-start mb-3';
+                    const title = document.createElement('h3');
+                    title.className = 'text-lg font-semibold text-gray-900';
+                    title.textContent = recipe.title || 'Untitled';
+                    header.appendChild(title);
+
+                    const actions = document.createElement('div');
+                    actions.className = 'flex space-x-2';
+                    const viewBtn = document.createElement('button');
+                    viewBtn.className = 'text-primary-600 hover:text-primary-800 font-medium text-sm';
+                    viewBtn.innerHTML = '<i class="fas fa-eye mr-1"></i>View';
+                    viewBtn.addEventListener('click', () => loadFavoriteRecipe(recipe.id));
+                    const removeBtn = document.createElement('button');
+                    removeBtn.className = 'text-red-600 hover:text-red-800 font-medium text-sm';
+                    removeBtn.innerHTML = '<i class="fas fa-trash mr-1"></i>Remove';
+                    removeBtn.addEventListener('click', () => removeFavorite(recipe.id));
+                    actions.appendChild(viewBtn);
+                    actions.appendChild(removeBtn);
+                    header.appendChild(actions);
+                    card.appendChild(header);
+
+                    const addLine = (label, value) => {
+                        const line = document.createElement('div');
+                        line.className = 'text-sm text-gray-600 mb-2';
+                        const strong = document.createElement('span');
+                        strong.className = 'font-medium';
+                        strong.textContent = label + ' ';
+                        line.appendChild(strong);
+                        line.appendChild(document.createTextNode(value));
+                        card.appendChild(line);
+                    };
+                    addLine('Ingredients:', recipe.ingredients || 'Not specified');
+                    addLine('Cuisine:', recipe.cuisine || 'Any');
+                    addLine('Saved:', new Date(recipe.timestamp).toLocaleDateString());
+
+                    const preview = document.createElement('div');
+                    preview.className = 'text-xs text-gray-500';
+                    const content = recipe.content || '';
+                    preview.textContent = content.length > 150 ? content.substring(0, 150) + '...' : content;
+                    card.appendChild(preview);
+
+                    favoritesList.appendChild(card);
+                });
             }
 
             // Load favorite recipe
@@ -1483,7 +1523,12 @@
                 const notification = document.createElement('div');
                 const bgColor = type === 'success' ? 'bg-green-500' : 'bg-blue-500';
                 notification.className = `fixed top-4 right-4 ${bgColor} text-white px-4 py-2 rounded-lg shadow-lg z-50`;
-                notification.innerHTML = `<i class="fas fa-${type === 'success' ? 'check' : 'info'} mr-2"></i>${message}`;
+                const icon = document.createElement('i');
+                icon.className = `fas fa-${type === 'success' ? 'check' : 'info'} mr-2`;
+                const text = document.createElement('span');
+                text.textContent = message;
+                notification.appendChild(icon);
+                notification.appendChild(text);
                 document.body.appendChild(notification);
                 
                 setTimeout(() => {

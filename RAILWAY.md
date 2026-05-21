@@ -29,6 +29,7 @@ Open your **Java app service** → **Variables** → add:
 | `OPENAI_API_KEY` | Yes (for free trial) | Shared demo key. **Never commit this.** Users get 5 recipes/session without their own key. |
 | `APP_ENCRYPTION_KEY` | Yes | Random string, **at least 32 characters**. Encrypts user API keys in session. Generate: `openssl rand -base64 32` |
 | `APP_SESSION_COOKIE_SECURE` | Recommended | Set to `true` so session cookies are HTTPS-only. **Do not use `SERVER_SSL_ENABLED`** — Spring Boot maps that to `server.ssl.enabled` and the app will crash without a keystore. |
+| `APP_CORS_ALLOWED_ORIGINS` | Recommended | Your public app URL, e.g. `https://your-app.up.railway.app` (comma-separated if multiple). |
 | `SPRING_DATASOURCE_URL` | Yes | JDBC URL to Railway Postgres |
 | `SPRING_DATASOURCE_USERNAME` | Yes | DB user |
 | `SPRING_DATASOURCE_PASSWORD` | Yes | DB password |

@@ -95,7 +95,7 @@ public class OpenAIService {
             return jsonResponse.get("choices").get(0).get("message").get("content").asText();
 
         } catch (Exception e) {
-            throw new RuntimeException("Error calling OpenAI API: " + e.getMessage(), e);
+            throw new RuntimeException("OpenAI request failed", e);
         }
     }
 }
