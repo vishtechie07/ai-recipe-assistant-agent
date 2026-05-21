@@ -61,35 +61,74 @@
         <div class="bg-white rounded-2xl shadow-xl p-8 mb-8">
             <h2 class="text-2xl font-bold text-gray-900 mb-6 flex items-center">
                 <i class="fas fa-key text-primary-600 mr-3"></i>
-                OpenAI API Key Setup
+                <span id="apiKeySectionTitle">OpenAI API Key <span class="text-base font-normal text-gray-500">(optional with free trial)</span></span>
             </h2>
+
+            <div id="trialStatusCard"
+                 th:classappend="${defaultKeyAvailable and !hasApiKey and defaultTrialsRemaining > 0} ? '' : ' hidden'"
+                 class="mb-4 p-5 bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-xl">
+                <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <div class="flex items-center">
+                        <i class="fas fa-gift text-amber-600 text-xl mr-3"></i>
+                        <span class="text-amber-950 font-semibold text-lg">Free trial — shared app key</span>
+                    </div>
+                    <div id="trialCounterBadge" class="bg-white border-2 border-amber-400 rounded-full px-4 py-2 text-amber-900 font-bold text-sm shadow-sm">
+                        <span id="trialUsedCount" th:text="${defaultRecipesUsed}">0</span>
+                        /
+                        <span id="trialMaxCount" th:text="${defaultRecipesMax}">5</span>
+                        recipes used
+                    </div>
+                </div>
+                <div class="w-full bg-amber-200 rounded-full h-2.5 mb-3">
+                    <div id="trialProgressBar" class="bg-amber-600 h-2.5 rounded-full transition-all duration-300"
+                         th:style="'width:' + (${defaultRecipesMax} > 0 ? (${defaultRecipesUsed} * 100 / ${defaultRecipesMax}) : 0) + '%'"></div>
+                </div>
+                <p id="trialBannerText" class="text-amber-900 font-medium"
+                   th:if="${defaultKeyAvailable and !hasApiKey and defaultTrialsRemaining > 0}"
+                   th:text="'You can generate ' + ${defaultTrialsRemaining} + ' more recipe(s) without adding your own key.'">
+                </p>
+                <p id="trialBannerSubtext" class="text-sm text-amber-800 mt-1">
+                    After <span id="trialMaxInline" th:text="${defaultRecipesMax}">5</span> recipes this session, add your own OpenAI key for unlimited use.
+                </p>
+            </div>
+
+            <div id="trialExhaustedCard"
+                 th:classappend="${defaultKeyAvailable and !hasApiKey and defaultTrialsRemaining == 0} ? '' : ' hidden'"
+                 class="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                <div class="flex items-start">
+                    <i class="fas fa-ban text-red-600 mr-3 mt-1"></i>
+                    <div>
+                        <p class="text-red-900 font-medium">Free trial complete — all <span id="trialMaxExhausted">5</span> shared-key recipes used this session.</p>
+                        <p class="text-sm text-red-800 mt-1">Add your OpenAI API key below to keep generating recipes.</p>
+                    </div>
+                </div>
+            </div>
             
             <div id="apiKeySection" class="space-y-4">
                 <!-- API Key Input -->
-                <div id="apiKeyInput" class="flex space-x-4">
-                    <div class="flex-1">
-                        <label for="apiKey" class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-lock mr-2 text-primary-600"></i>
-                            OpenAI API Key
-                        </label>
+                <div id="apiKeyInput" class="space-y-2">
+                    <label for="apiKey" class="block text-sm font-medium text-gray-700">
+                        <i class="fas fa-lock mr-2 text-primary-600"></i>
+                        Your OpenAI API Key
+                    </label>
+                    <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
                         <input 
                             type="password" 
                             id="apiKey" 
-                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            class="flex-1 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                             placeholder="sk-your-openai-api-key-here">
-                        <p class="text-sm text-gray-500 mt-2">
-                            <i class="fas fa-info-circle mr-1"></i>
-                            Your API key is stored securely in your browser session and will be cleared when you close the app.
-                        </p>
-                    </div>
-                    <div class="flex items-end">
                         <button 
                             id="setApiKeyBtn"
-                            class="bg-primary-600 hover:bg-primary-700 text-white font-semibold py-3 px-6 rounded-lg transition duration-200 flex items-center">
+                            type="button"
+                            class="shrink-0 w-full sm:w-auto bg-primary-600 hover:bg-primary-700 text-white font-semibold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center">
                             <i class="fas fa-check mr-2"></i>
                             Set Key
                         </button>
                     </div>
+                    <p class="text-sm text-gray-500">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        Optional: use your own key for unlimited recipes. Stored encrypted in your server session.
+                    </p>
                 </div>
 
                 <!-- API Key Status -->
@@ -108,6 +147,16 @@
                     </div>
                 </div>
 
+                <!-- No server trial configured -->
+                <div id="apiKeyNoTrialInfo"
+                     th:classappend="${!defaultKeyAvailable and !hasApiKey} ? '' : ' hidden'"
+                     class="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div class="flex items-start">
+                        <i class="fas fa-info-circle text-blue-600 mr-3 mt-1"></i>
+                        <span class="text-blue-900">No shared trial key on this server. Add your OpenAI API key to generate recipes.</span>
+                    </div>
+                </div>
+
                 <!-- API Key Error -->
                 <div id="apiKeyError" class="hidden">
                     <div class="flex items-center p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -121,9 +170,16 @@
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <!-- Input Section -->
             <div class="bg-white rounded-2xl shadow-xl p-8">
-                <h2 class="text-2xl font-bold text-gray-900 mb-6 flex items-center">
-                    <i class="fas fa-magic text-primary-600 mr-3"></i>
-                    Create Your Recipe
+                <h2 class="text-2xl font-bold text-gray-900 mb-6 flex items-center flex-wrap gap-3">
+                    <span class="flex items-center">
+                        <i class="fas fa-magic text-primary-600 mr-3"></i>
+                        Create Your Recipe
+                    </span>
+                    <span id="recipeTrialPill"
+                          th:classappend="${defaultKeyAvailable and !hasApiKey and defaultTrialsRemaining > 0} ? '' : ' hidden'"
+                          class="text-sm font-semibold bg-amber-100 text-amber-900 border border-amber-300 px-3 py-1 rounded-full">
+                        Trial: <span id="recipeTrialRemaining" th:text="${defaultTrialsRemaining}">5</span> left
+                    </span>
                 </h2>
                 
                 <form id="recipeForm" class="space-y-6">
@@ -322,6 +378,18 @@
             const apiKeyStatus = document.getElementById('apiKeyStatus');
             const apiKeyError = document.getElementById('apiKeyError');
             const apiKeyErrorMessage = document.getElementById('apiKeyErrorMessage');
+            const trialStatusCard = document.getElementById('trialStatusCard');
+            const trialExhaustedCard = document.getElementById('trialExhaustedCard');
+            const trialBannerText = document.getElementById('trialBannerText');
+            const trialUsedCount = document.getElementById('trialUsedCount');
+            const trialMaxCount = document.getElementById('trialMaxCount');
+            const trialMaxInline = document.getElementById('trialMaxInline');
+            const trialMaxExhausted = document.getElementById('trialMaxExhausted');
+            const trialProgressBar = document.getElementById('trialProgressBar');
+            const apiKeyNoTrialInfo = document.getElementById('apiKeyNoTrialInfo');
+            const recipeTrialPill = document.getElementById('recipeTrialPill');
+            const recipeTrialRemaining = document.getElementById('recipeTrialRemaining');
+            const apiKeySectionTitle = document.getElementById('apiKeySectionTitle');
             const form = document.getElementById('recipeForm');
             const generateBtn = document.getElementById('generateBtn');
             const tipsBtn = document.getElementById('tipsBtn');
@@ -336,30 +404,81 @@
 
 
             function checkApiKeyStatus() {
-                fetch('/api-key-status')
+                fetch('/api-key-status', { credentials: 'same-origin' })
                     .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            showApiKeyStatus();
-                        } else {
-                            showApiKeyInput();
-                        }
-                    })
-                    .catch(err => {
-                        showApiKeyInput();
-                    });
+                    .then(data => updateApiKeyUi(data))
+                    .catch(() => showApiKeyInput());
+            }
+
+            function updateTrialDisplay(data) {
+                const max = data.defaultRecipesMax ?? 5;
+                const used = data.defaultRecipesUsed ?? 0;
+                const remaining = data.defaultTrialsRemaining ?? 0;
+
+                trialMaxCount.textContent = max;
+                trialMaxInline.textContent = max;
+                trialMaxExhausted.textContent = max;
+                trialUsedCount.textContent = used;
+                trialProgressBar.style.width = (max > 0 ? Math.min(100, (used / max) * 100) : 0) + '%';
+
+                if (data.hasUserKey) {
+                    trialStatusCard.classList.add('hidden');
+                    trialExhaustedCard.classList.add('hidden');
+                    recipeTrialPill.classList.add('hidden');
+                    apiKeySectionTitle.innerHTML = 'OpenAI API Key <span class="text-base font-normal text-green-600">(your key — unlimited)</span>';
+                    return;
+                }
+
+                apiKeySectionTitle.innerHTML = 'OpenAI API Key <span class="text-base font-normal text-gray-500">(optional with free trial)</span>';
+
+                if (data.defaultKeyAvailable && remaining > 0) {
+                    trialStatusCard.classList.remove('hidden');
+                    trialExhaustedCard.classList.add('hidden');
+                    apiKeyNoTrialInfo.classList.add('hidden');
+                    recipeTrialPill.classList.remove('hidden');
+                    recipeTrialRemaining.textContent = remaining;
+                    trialBannerText.textContent =
+                        used === 0
+                            ? 'Generate up to ' + max + ' recipes using the app\'s shared OpenAI key (no key required yet).'
+                            : 'You have used ' + used + ' of ' + max + ' shared-key recipes. ' + remaining + ' remaining this session.';
+                } else if (data.defaultKeyAvailable && remaining === 0) {
+                    trialStatusCard.classList.add('hidden');
+                    trialExhaustedCard.classList.remove('hidden');
+                    recipeTrialPill.classList.add('hidden');
+                    apiKeyNoTrialInfo.classList.add('hidden');
+                } else {
+                    trialStatusCard.classList.add('hidden');
+                    trialExhaustedCard.classList.add('hidden');
+                    recipeTrialPill.classList.add('hidden');
+                    apiKeyNoTrialInfo.classList.remove('hidden');
+                }
+            }
+
+            function updateApiKeyUi(data) {
+                apiKeyError.classList.add('hidden');
+                updateTrialDisplay(data);
+
+                if (data.hasUserKey) {
+                    showApiKeyStatus();
+                    return;
+                }
+
+                showApiKeyInput();
+                if (data.defaultKeyAvailable && data.defaultTrialsRemaining === 0) {
+                    showApiKeyError(data.error || 'Free trial used up. Add your OpenAI API key.');
+                }
             }
 
             function showApiKeyStatus() {
-                apiKeyInput.parentElement.classList.add('hidden');
+                apiKeyInput.classList.add('hidden');
                 apiKeyStatus.classList.remove('hidden');
                 apiKeyError.classList.add('hidden');
+                apiKeyNoTrialInfo.classList.add('hidden');
             }
 
             function showApiKeyInput() {
-                apiKeyInput.parentElement.classList.remove('hidden');
+                apiKeyInput.classList.remove('hidden');
                 apiKeyStatus.classList.add('hidden');
-                apiKeyError.classList.add('hidden');
             }
 
             function showApiKeyError(message) {
@@ -385,8 +504,22 @@
                 errorMessage.textContent = message;
             }
 
-            function showResults(content) {
+            function showTrialGenerationNotice(result) {
+                if (!result || result.keySource !== 'default') return '';
+                const used = result.defaultRecipesUsed ?? 0;
+                const max = result.defaultRecipesMax ?? 5;
+                const remaining = result.defaultTrialsRemaining ?? 0;
+                return `
+                    <div class="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-sm">
+                        <i class="fas fa-chart-pie mr-2"></i>
+                        <strong>Shared trial key:</strong> ${used} of ${max} recipes used this session
+                        (${remaining} remaining). Add your own key for unlimited recipes.
+                    </div>`;
+            }
+
+            function showResults(content, result) {
                 results.innerHTML = `
+                    ${showTrialGenerationNotice(result)}
                     <div class="prose max-w-none">
                         <div class="whitespace-pre-wrap text-gray-800 leading-relaxed">${content}</div>
                     </div>
@@ -803,15 +936,21 @@
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify(data)
+                        body: JSON.stringify(data),
+                        credentials: 'same-origin'
                     });
 
                     const result = await response.json();
+
+                    if (endpoint === '/generate-recipe') {
+                        fetch('/api-key-status', { credentials: 'same-origin' })
+                            .then(r => r.json()).then(updateApiKeyUi).catch(() => {});
+                    }
                     
-                    if (result.success) {
+                    if (response.ok && result.success) {
                         return result;
                     } else {
-                        throw new Error(result.error);
+                        throw new Error(result.error || result.message || 'Request failed');
                     }
                 } catch (err) {
                     throw err;
@@ -830,8 +969,8 @@
                 setApiKeyBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Validating...';
 
                 try {
-                    const result = await makeRequest('/set-api-key', { apiKey: apiKey });
-                    showApiKeyStatus();
+                    await makeRequest('/set-api-key', { apiKey: apiKey });
+                    checkApiKeyStatus();
                     apiKeyInput.value = '';
                 } catch (err) {
                     showApiKeyError(err.message);
@@ -844,7 +983,7 @@
             clearApiKeyBtn.addEventListener('click', async function() {
                 try {
                     await makeRequest('/clear-api-key', {});
-                    showApiKeyInput();
+                    checkApiKeyStatus();
                 } catch (err) {
                     showApiKeyError(err.message);
                 }
@@ -869,7 +1008,7 @@
                 showLoading();
                 try {
                     const result = await makeRequest('/generate-recipe', data);
-                    showResults(result.content);
+                    showResults(result.content, result);
                 } catch (err) {
                     showError(err.message);
                 } finally {
