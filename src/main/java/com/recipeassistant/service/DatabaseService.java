@@ -89,8 +89,10 @@ public class DatabaseService {
         
         if (recipeOpt.isPresent()) {
             Recipe recipe = recipeOpt.get();
-            
-            // Check if already favorited
+            if (!recipe.getUser().getId().equals(user.getId())) {
+                return false;
+            }
+
             if (!userFavoriteRepository.existsByUserAndRecipe(user, recipe)) {
                 UserFavorite favorite = new UserFavorite(user, recipe);
                 userFavoriteRepository.save(favorite);
@@ -111,6 +113,9 @@ public class DatabaseService {
         
         if (recipeOpt.isPresent()) {
             Recipe recipe = recipeOpt.get();
+            if (!recipe.getUser().getId().equals(user.getId())) {
+                return false;
+            }
             userFavoriteRepository.deleteByUserAndRecipe(user, recipe);
             recipe.setIsFavorite(false);
             recipeRepository.save(recipe);

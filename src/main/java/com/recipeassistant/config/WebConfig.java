@@ -16,6 +16,8 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(@NonNull InterceptorRegistry registry) {
         registry.addInterceptor(rateLimitInterceptor)
-                .addPathPatterns("/set-api-key", "/clear-api-key", "/generate-recipe", "/get-cooking-tips");
+                .addPathPatterns(
+                    "/set-api-key", "/clear-api-key", "/generate-recipe", "/get-cooking-tips",
+                    "/save-recipe", "/add-to-favorites", "/remove-from-favorites");
     }
 }

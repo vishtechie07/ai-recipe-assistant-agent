@@ -1,7 +1,12 @@
 package com.recipeassistant.controller;
 
+import com.recipeassistant.model.ApiKeyRequest;
+import com.recipeassistant.model.FavoriteRequest;
 import com.recipeassistant.model.RecipeRequest;
 import com.recipeassistant.model.RecipeResponse;
+import com.recipeassistant.model.SaveRecipeRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.recipeassistant.service.OpenAIService;
 import com.recipeassistant.service.OpenAiKeyService;
 import com.recipeassistant.service.SecurityAuditService;
@@ -21,6 +26,9 @@ import java.util.UUID;
 
 @Controller
 public class RecipeController {
+
+    private static final Logger log = LoggerFactory.getLogger(RecipeController.class);
+    private static final String GENERIC_ERROR = "An error occurred. Please try again later.";
 
     @Autowired
     private OpenAIService openAIService;
@@ -50,18 +58,19 @@ public class RecipeController {
 
     @PostMapping("/set-api-key")
     @ResponseBody
-    public ResponseEntity<RecipeResponse> setApiKey(@RequestBody ApiKeyRequest request, 
-                                                   HttpSession session, 
+    public ResponseEntity<RecipeResponse> setApiKey(@Valid @RequestBody ApiKeyRequest request,
+                                                   BindingResult bindingResult,
+                                                   HttpSession session,
                                                    HttpServletRequest httpRequest) {
+        if (bindingResult.hasErrors()) {
+            String errorMessage = bindingResult.getFieldErrors().stream()
+                .map(error -> error.getDefaultMessage())
+                .findFirst()
+                .orElse("Invalid API key");
+            return ResponseEntity.badRequest()
+                .body(new RecipeResponse(false, null, errorMessage));
+        }
         try {
-            // Validate API key format
-            if (request.getApiKey() == null || !request.getApiKey().startsWith("sk-")) {
-                securityAuditService.logApiKeyValidationFailed(getClientIpAddress(httpRequest), "Invalid format");
-                return ResponseEntity.badRequest()
-                    .body(new RecipeResponse(false, null, "Invalid API key format. Must start with 'sk-'"));
-            }
-            
-            // Validate the API key by making a simple test call
             String testResult = openAIService.testApiKey(request.getApiKey());
             if (testResult != null) {
                 // Encrypt and store API key securely
@@ -78,9 +87,10 @@ public class RecipeController {
                     .body(new RecipeResponse(false, null, "Invalid API key. Please check and try again."));
             }
         } catch (Exception e) {
-            securityAuditService.logApiKeyValidationFailed(getClientIpAddress(httpRequest), e.getMessage());
+            log.warn("API key validation failed for {}", getClientIpAddress(httpRequest), e);
+            securityAuditService.logApiKeyValidationFailed(getClientIpAddress(httpRequest), "validation error");
             return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, "Error validating API key: " + e.getMessage()));
+                .body(new RecipeResponse(false, null, GENERIC_ERROR));
         }
     }
 
@@ -164,8 +174,9 @@ public class RecipeController {
             populateTrialFields(body, session);
             return ResponseEntity.ok(body);
         } catch (Exception e) {
+            log.error("Recipe generation failed for {}", getClientIpAddress(httpRequest), e);
             return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, "Error generating recipe: " + e.getMessage()));
+                .body(new RecipeResponse(false, null, GENERIC_ERROR));
         }
     }
 
@@ -185,7 +196,7 @@ public class RecipeController {
                 .body(new RecipeResponse(false, null, errorMessage));
         }
         
-        OpenAiKeyService.ResolvedKey resolved = openAiKeyService.resolveKey(session, encryptionService, false);
+        OpenAiKeyService.ResolvedKey resolved = openAiKeyService.resolveKey(session, encryptionService, true);
         if (!resolved.isValid()) {
             int status = openAiKeyService.isDefaultKeyConfigured() && !openAiKeyService.hasUserKey(session)
                 && openAiKeyService.getDefaultTrialsRemaining(session) == 0 ? 429 : 401;
@@ -195,31 +206,26 @@ public class RecipeController {
 
         try {
             String tips = openAIService.getCookingTips(resolved.getApiKey(), request.getIngredients());
+            if (resolved.isIncrementTrialOnSuccess()) {
+                openAiKeyService.incrementDefaultRecipeCount(session);
+            }
             return ResponseEntity.ok(new RecipeResponse(true, tips, null));
         } catch (Exception e) {
+            log.error("Cooking tips failed for {}", getClientIpAddress(httpRequest), e);
             return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, "Error getting cooking tips: " + e.getMessage()));
+                .body(new RecipeResponse(false, null, GENERIC_ERROR));
         }
     }
 
-    // Inner class for API key requests
-    public static class ApiKeyRequest {
-        private String apiKey;
-
-        public String getApiKey() {
-            return apiKey;
-        }
-
-        public void setApiKey(String apiKey) {
-            this.apiKey = apiKey;
-        }
-    }
-    
     private void populateTrialFields(RecipeResponse response, HttpSession session) {
         response.setDefaultKeyAvailable(openAiKeyService.isDefaultKeyConfigured());
         response.setDefaultTrialsRemaining(openAiKeyService.getDefaultTrialsRemaining(session));
         response.setDefaultRecipesMax(openAiKeyService.getMaxDefaultRecipesPerSession());
         response.setDefaultRecipesUsed(openAiKeyService.getDefaultRecipesUsed(session));
+    }
+
+    private String sessionUserEmail(HttpSession session) {
+        return "session-" + session.getId() + "@recipeassistant.local";
     }
 
     private String getClientIpAddress(HttpServletRequest request) {
@@ -240,12 +246,20 @@ public class RecipeController {
     
     @PostMapping("/save-recipe")
     @ResponseBody
-    public ResponseEntity<RecipeResponse> saveRecipe(@RequestBody SaveRecipeRequest request, 
+    public ResponseEntity<RecipeResponse> saveRecipe(@Valid @RequestBody SaveRecipeRequest request,
+                                                   BindingResult bindingResult,
                                                    HttpSession session,
                                                    HttpServletRequest httpRequest) {
+        if (bindingResult.hasErrors()) {
+            String errorMessage = bindingResult.getFieldErrors().stream()
+                .map(error -> error.getDefaultMessage())
+                .findFirst()
+                .orElse("Invalid recipe data");
+            return ResponseEntity.badRequest()
+                .body(new RecipeResponse(false, null, errorMessage));
+        }
         try {
-            // For now, use a default user email (can be enhanced with user authentication later)
-            String userEmail = "default@recipeassistant.com";
+            String userEmail = sessionUserEmail(session);
             
             // Extract recipe title from the content (simple extraction)
             String title = extractRecipeTitle(request.getContent());
@@ -263,8 +277,9 @@ public class RecipeController {
             securityAuditService.logRecipeGeneration(getClientIpAddress(httpRequest), request.getIngredients());
             return ResponseEntity.ok(new RecipeResponse(true, "Recipe saved to database successfully!", null));
         } catch (Exception e) {
+            log.error("Save recipe failed", e);
             return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, "Error saving recipe: " + e.getMessage()));
+                .body(new RecipeResponse(false, null, GENERIC_ERROR));
         }
     }
     
@@ -272,7 +287,7 @@ public class RecipeController {
     @ResponseBody
     public ResponseEntity<RecipeResponse> getUserRecipes(HttpSession session) {
         try {
-            String userEmail = "default@recipeassistant.com"; // Default user for now
+            String userEmail = sessionUserEmail(session);
             var recipes = databaseService.getUserRecipes(userEmail);
             
             // Convert recipes to a simple format for frontend
@@ -285,25 +300,26 @@ public class RecipeController {
             
             return ResponseEntity.ok(new RecipeResponse(true, recipesList.toString(), null));
         } catch (Exception e) {
+            log.error("Get user recipes failed", e);
             return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, "Error retrieving recipes: " + e.getMessage()));
+                .body(new RecipeResponse(false, null, GENERIC_ERROR));
         }
     }
     
     @GetMapping("/database-status")
     @ResponseBody
-    public ResponseEntity<RecipeResponse> getDatabaseStatus() {
+    public ResponseEntity<RecipeResponse> getDatabaseStatus(HttpSession session) {
         try {
-            // Simple database connectivity test
-            String userEmail = "default@recipeassistant.com";
+            String userEmail = sessionUserEmail(session);
             var stats = databaseService.getUserStats(userEmail);
-            
-            return ResponseEntity.ok(new RecipeResponse(true, 
-                "Database connected successfully. Total recipes: " + stats.get("totalRecipes") + 
-                ", Favorites: " + stats.get("favoriteRecipes"), null));
+
+            return ResponseEntity.ok(new RecipeResponse(true,
+                "Database connected. Your recipes: " + stats.get("totalRecipes")
+                    + ", favorites: " + stats.get("favoriteRecipes"), null));
         } catch (Exception e) {
+            log.error("Database status check failed", e);
             return ResponseEntity.status(503)
-                .body(new RecipeResponse(false, null, "Database connection failed: " + e.getMessage()));
+                .body(new RecipeResponse(false, null, "Database unavailable."));
         }
     }
     
@@ -311,7 +327,7 @@ public class RecipeController {
     @ResponseBody
     public ResponseEntity<RecipeResponse> getUserFavorites(HttpSession session) {
         try {
-            String userEmail = "default@recipeassistant.com"; // Default user for now
+            String userEmail = sessionUserEmail(session);
             var favorites = databaseService.getUserFavorites(userEmail);
             
             // Convert favorites to a simple format for frontend
@@ -324,17 +340,23 @@ public class RecipeController {
             
             return ResponseEntity.ok(new RecipeResponse(true, favoritesList.toString(), null));
         } catch (Exception e) {
+            log.error("Get favorites failed", e);
             return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, "Error retrieving favorites: " + e.getMessage()));
+                .body(new RecipeResponse(false, null, GENERIC_ERROR));
         }
     }
     
     @PostMapping("/add-to-favorites")
     @ResponseBody
-    public ResponseEntity<RecipeResponse> addToFavorites(@RequestBody FavoriteRequest request, 
+    public ResponseEntity<RecipeResponse> addToFavorites(@Valid @RequestBody FavoriteRequest request,
+                                                       BindingResult bindingResult,
                                                        HttpSession session) {
+        if (bindingResult.hasErrors()) {
+            return ResponseEntity.badRequest()
+                .body(new RecipeResponse(false, null, "Invalid recipe id"));
+        }
         try {
-            String userEmail = "default@recipeassistant.com"; // Default user for now
+            String userEmail = sessionUserEmail(session);
             UUID recipeId = UUID.fromString(request.getRecipeId());
             boolean success = databaseService.addToFavorites(recipeId, userEmail);
             
@@ -345,17 +367,23 @@ public class RecipeController {
                     .body(new RecipeResponse(false, null, "Recipe not found or already favorited"));
             }
         } catch (Exception e) {
+            log.error("Add to favorites failed", e);
             return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, "Error adding to favorites: " + e.getMessage()));
+                .body(new RecipeResponse(false, null, GENERIC_ERROR));
         }
     }
     
     @PostMapping("/remove-from-favorites")
     @ResponseBody
-    public ResponseEntity<RecipeResponse> removeFromFavorites(@RequestBody FavoriteRequest request, 
+    public ResponseEntity<RecipeResponse> removeFromFavorites(@Valid @RequestBody FavoriteRequest request,
+                                                            BindingResult bindingResult,
                                                             HttpSession session) {
+        if (bindingResult.hasErrors()) {
+            return ResponseEntity.badRequest()
+                .body(new RecipeResponse(false, null, "Invalid recipe id"));
+        }
         try {
-            String userEmail = "default@recipeassistant.com"; // Default user for now
+            String userEmail = sessionUserEmail(session);
             UUID recipeId = UUID.fromString(request.getRecipeId());
             boolean success = databaseService.removeFromFavorites(recipeId, userEmail);
             
@@ -366,8 +394,9 @@ public class RecipeController {
                     .body(new RecipeResponse(false, null, "Recipe not found in favorites"));
             }
         } catch (Exception e) {
+            log.error("Remove from favorites failed", e);
             return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, "Error removing from favorites: " + e.getMessage()));
+                .body(new RecipeResponse(false, null, GENERIC_ERROR));
         }
     }
     
@@ -390,30 +419,5 @@ public class RecipeController {
             }
         }
         return "Untitled Recipe";
-    }
-    
-    // Inner classes for new requests
-    public static class SaveRecipeRequest {
-        private String content;
-        private String ingredients;
-        private String cuisine;
-        private String dietaryRestrictions;
-        
-        // Getters and setters
-        public String getContent() { return content; }
-        public void setContent(String content) { this.content = content; }
-        public String getIngredients() { return ingredients; }
-        public void setIngredients(String ingredients) { this.ingredients = ingredients; }
-        public String getCuisine() { return cuisine; }
-        public void setCuisine(String cuisine) { this.cuisine = cuisine; }
-        public String getDietaryRestrictions() { return dietaryRestrictions; }
-        public void setDietaryRestrictions(String dietaryRestrictions) { this.dietaryRestrictions = dietaryRestrictions; }
-    }
-    
-    public static class FavoriteRequest {
-        private String recipeId;
-        
-        public String getRecipeId() { return recipeId; }
-        public void setRecipeId(String recipeId) { this.recipeId = recipeId; }
     }
 }
