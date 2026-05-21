@@ -28,7 +28,7 @@ Open your **Java app service** → **Variables** → add:
 |----------|----------|-------------|
 | `OPENAI_API_KEY` | Yes (for free trial) | Shared demo key. **Never commit this.** Users get 5 recipes/session without their own key. |
 | `APP_ENCRYPTION_KEY` | Yes | Random string, **at least 32 characters**. Encrypts user API keys in session. Generate: `openssl rand -base64 32` |
-| `SERVER_SSL_ENABLED` | Yes on Railway | Set to `true` (HTTPS). Enables secure session cookies. |
+| `APP_SESSION_COOKIE_SECURE` | Recommended | Set to `true` so session cookies are HTTPS-only. **Do not use `SERVER_SSL_ENABLED`** — Spring Boot maps that to `server.ssl.enabled` and the app will crash without a keystore. |
 | `SPRING_DATASOURCE_URL` | Yes | JDBC URL to Railway Postgres |
 | `SPRING_DATASOURCE_USERNAME` | Yes | DB user |
 | `SPRING_DATASOURCE_PASSWORD` | Yes | DB password |
@@ -53,7 +53,7 @@ Confirm the JAR name in `pom.xml` `<artifactId>` if the start command fails.
 ## 5. Networking
 
 1. App service → **Settings** → **Networking** → **Generate domain**.
-2. Railway serves HTTPS; with `SERVER_SSL_ENABLED=true`, session cookies are marked secure.
+2. Railway serves HTTPS at the edge; the app runs HTTP internally (`server.ssl.enabled=false` in the `prod` profile). Set `APP_SESSION_COOKIE_SECURE=true` for secure cookies.
 
 ## 6. OpenAI dashboard (recommended)
 
@@ -93,3 +93,7 @@ mvn spring-boot:run
 ```
 
 Without `OPENAI_API_KEY`, users must enter their own key (same as before).
+
+## Troubleshooting: "SSL is enabled but no trust material is configured"
+
+This happens if `SERVER_SSL_ENABLED=true` is set in Railway variables. **Delete that variable.** Railway terminates TLS; the JAR must not enable Tomcat SSL. Use `APP_SESSION_COOKIE_SECURE=true` instead, and ensure `SPRING_PROFILES_ACTIVE=prod` (or rely on Railway setting it).
