@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', function () {
         trialHowBtn: document.getElementById('trialHowBtn'),
         trialInfoModal: document.getElementById('trialInfoModal'),
         closeTrialInfoBtn: document.getElementById('closeTrialInfoBtn'),
-        tipsTrialNotice: document.getElementById('tipsTrialNotice'),
+        preferencesPanel: document.getElementById('preferencesPanel'),
         generationBlockedNotice: document.getElementById('generationBlockedNotice'),
         generationBlockedText: document.getElementById('generationBlockedText'),
         openApiKeyFromNotice: document.getElementById('openApiKeyFromNotice'),
@@ -71,6 +71,7 @@ document.addEventListener('DOMContentLoaded', function () {
     let activeAbort = null;
     let lastFailedAction = null;
     let loadingMessageTimer = null;
+    let recipeMoreMenuListenerBound = false;
 
     checkApiKeyStatus();
     refreshLibraryCount();
@@ -147,9 +148,52 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function regenerateButtonLabel() {
-        return isOnServerTrial()
-            ? 'Try another (uses 1 free credit)'
-            : 'Try another';
+        return 'Try another';
+    }
+
+    function syncPreferencesPanel() {
+        const hasPrefs = document.getElementById('cuisine').value
+            || document.getElementById('dietaryRestrictions').value.trim();
+        if (hasPrefs) els.preferencesPanel.open = true;
+    }
+
+    function showResultsPanel() {
+        els.resultsPanel.classList.remove('hidden');
+    }
+
+    function hideResultsPanel() {
+        els.resultsPanel.classList.add('hidden');
+        hideResultsError();
+        els.cancelBtn.classList.add('hidden');
+        els.resultsLoading.classList.add('hidden');
+        els.resultsPanel.setAttribute('aria-busy', 'false');
+    }
+
+    function closeRecipeMoreMenu() {
+        const menu = document.getElementById('recipeMoreMenu');
+        const btn = document.getElementById('recipeMoreBtn');
+        if (!menu || !btn) return;
+        menu.classList.add('hidden');
+        btn.setAttribute('aria-expanded', 'false');
+    }
+
+    function toggleRecipeMoreMenu() {
+        const menu = document.getElementById('recipeMoreMenu');
+        const btn = document.getElementById('recipeMoreBtn');
+        if (!menu || !btn) return;
+        const isHidden = menu.classList.toggle('hidden');
+        btn.setAttribute('aria-expanded', isHidden ? 'false' : 'true');
+    }
+
+    function bindRecipeMoreMenuDismiss() {
+        if (recipeMoreMenuListenerBound) return;
+        recipeMoreMenuListenerBound = true;
+        document.addEventListener('click', e => {
+            if (!e.target.closest('.recipe-actions-more')) closeRecipeMoreMenu();
+        });
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') closeRecipeMoreMenu();
+        });
     }
 
     function persistLastRecipe() {
@@ -180,10 +224,12 @@ document.addEventListener('DOMContentLoaded', function () {
             currentContentHash = saved.contentHash || null;
             currentRecipeId = saved.recipeId || null;
             currentInSaved = !!saved.inSaved;
+            syncPreferencesPanel();
             els.results.replaceChildren();
             els.results.appendChild(R.renderStructuredRecipe(saved.recipe));
             appendActionButtons();
             showFavoriteButton(currentInSaved);
+            showResultsPanel();
         } catch { /* ignore */ }
     }
 
@@ -208,11 +254,10 @@ document.addEventListener('DOMContentLoaded', function () {
         const trialActive = onServerTrial && remaining > 0;
 
         els.headerTrialBadge.classList.toggle('hidden', !onServerTrial || data.hasUserKey);
-        els.tipsTrialNotice.classList.toggle('hidden', !trialActive);
 
         if (onServerTrial && !data.hasUserKey) {
             els.headerTrialText.textContent = remaining + ' of ' + max + ' free left';
-            els.headerTrialProgress.style.width = (max > 0 ? Math.min(100, (used / max) * 100) : 0) + '%';
+            els.headerTrialProgress.style.width = (max > 0 ? Math.min(100, (remaining / max) * 100) : 0) + '%';
         }
 
         els.apiKeyPanel.classList.toggle('hidden', trialActive);
@@ -311,6 +356,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function showLoading(message) {
+        showResultsPanel();
         hideResultsError();
         hideFormError();
         startLoadingMessages(message);
@@ -331,6 +377,9 @@ document.addEventListener('DOMContentLoaded', function () {
         els.resultsPanel.setAttribute('aria-busy', 'false');
         activeAbort = null;
         if (apiKeyStatusData) updateGenerationControls(apiKeyStatusData);
+        const hasContent = els.results.childElementCount > 0;
+        const hasError = !els.resultsError.classList.contains('hidden');
+        if (!hasContent && !hasError) hideResultsPanel();
     }
 
     function showFormValidationError(message) {
@@ -342,7 +391,14 @@ document.addEventListener('DOMContentLoaded', function () {
         els.formError.classList.add('hidden');
     }
 
+    function isIngredientValidationError(message) {
+        if (!message) return false;
+        const lower = message.toLowerCase();
+        return lower.includes('food ingredient') || lower.includes('pantry') || lower.includes("doesn't look like");
+    }
+
     function showResultsError(message, showRetry) {
+        showResultsPanel();
         els.resultsErrorMessage.textContent = message;
         els.resultsError.classList.remove('hidden');
         els.retryBtn.classList.toggle('hidden', !showRetry);
@@ -356,13 +412,8 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function scrollToResults() {
+        if (els.resultsPanel.classList.contains('hidden')) showResultsPanel();
         els.resultsPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-
-    function emptyResultsPlaceholder() {
-        return `<div class="text-center text-gray-500 py-10">
-            <i class="fas fa-utensils text-4xl mb-3 text-gray-300" aria-hidden="true"></i>
-            <p>Add ingredients above and hit <strong>Generate Recipe</strong>.</p></div>`;
     }
 
     function showRecipeResult(recipe, result) {
@@ -376,6 +427,7 @@ document.addEventListener('DOMContentLoaded', function () {
         appendActionButtons();
         showFavoriteButton(currentInSaved);
         els.results.classList.add('recipe-fade-in');
+        showResultsPanel();
         persistLastRecipe();
         scrollToResults();
         if (result) {
@@ -390,35 +442,53 @@ document.addEventListener('DOMContentLoaded', function () {
         currentContentHash = null;
         currentInSaved = false;
         hideResultsError();
+        closeRecipeMoreMenu();
         els.results.replaceChildren();
         els.results.appendChild(R.renderTipsBanner());
         els.results.appendChild(R.renderCookingTips(tipsResult));
         sessionStorage.removeItem(STORAGE_LAST_RECIPE);
+        showResultsPanel();
         checkApiKeyStatus();
         scrollToResults();
     }
 
     function appendActionButtons() {
+        bindRecipeMoreMenuDismiss();
         const actions = document.createElement('div');
-        actions.className = 'mt-6 flex flex-wrap gap-3';
+        actions.className = 'recipe-actions-bar';
         actions.innerHTML = `
-            <button type="button" id="regenerateBtn" class="bg-white border border-primary-300 text-primary-700 hover:bg-primary-50 font-semibold py-2 px-4 rounded-lg text-sm" title="${R.escapeHtml(regenerateButtonLabel())}">
-                <i class="fas fa-rotate-right mr-2" aria-hidden="true"></i>${R.escapeHtml(regenerateButtonLabel())}
+            <button type="button" id="favoriteBtn" class="recipe-action-primary">
+                <i class="fas fa-heart" aria-hidden="true"></i><span>Save to Saved</span>
             </button>
-            <button type="button" id="printBtn" class="bg-primary-600 hover:bg-primary-700 text-white font-semibold py-2 px-4 rounded-lg text-sm">
-                <i class="fas fa-print mr-2" aria-hidden="true"></i>Print</button>
-            <button type="button" id="copyBtn" class="bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg text-sm">
-                <i class="fas fa-copy mr-2" aria-hidden="true"></i>Copy</button>
-            <button type="button" id="favoriteBtn" class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg text-sm">
-                <i class="fas fa-heart mr-2" aria-hidden="true"></i>Save to Saved</button>
-            <button type="button" id="addToCollectionBtn" class="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 font-semibold py-2 px-4 rounded-lg text-sm">
-                <i class="fas fa-folder-plus mr-2" aria-hidden="true"></i>Add to collection</button>`;
+            <button type="button" id="regenerateBtn" class="recipe-action-secondary" title="Regenerate with the same ingredients">
+                <i class="fas fa-rotate-right" aria-hidden="true"></i><span>${R.escapeHtml(regenerateButtonLabel())}</span>
+            </button>
+            <div class="recipe-actions-more">
+                <button type="button" id="recipeMoreBtn" class="recipe-action-menu-btn" aria-expanded="false" aria-haspopup="true">
+                    <i class="fas fa-ellipsis" aria-hidden="true"></i><span>More</span>
+                </button>
+                <div id="recipeMoreMenu" class="recipe-actions-menu hidden" role="menu">
+                    <button type="button" id="printBtn" role="menuitem">
+                        <i class="fas fa-print" aria-hidden="true"></i><span>Print</span>
+                    </button>
+                    <button type="button" id="copyBtn" role="menuitem">
+                        <i class="fas fa-copy" aria-hidden="true"></i><span>Copy text</span>
+                    </button>
+                    <button type="button" id="addToCollectionBtn" role="menuitem">
+                        <i class="fas fa-folder-plus" aria-hidden="true"></i><span>Add to collection</span>
+                    </button>
+                </div>
+            </div>`;
         els.results.appendChild(actions);
-        document.getElementById('regenerateBtn').addEventListener('click', () => els.form.requestSubmit());
-        document.getElementById('printBtn').addEventListener('click', printRecipe);
-        document.getElementById('copyBtn').addEventListener('click', copyToClipboard);
         document.getElementById('favoriteBtn').addEventListener('click', toggleSaved);
-        document.getElementById('addToCollectionBtn').addEventListener('click', openAddToCollectionModal);
+        document.getElementById('regenerateBtn').addEventListener('click', () => els.form.requestSubmit());
+        document.getElementById('recipeMoreBtn').addEventListener('click', e => {
+            e.stopPropagation();
+            toggleRecipeMoreMenu();
+        });
+        document.getElementById('printBtn').addEventListener('click', () => { closeRecipeMoreMenu(); printRecipe(); });
+        document.getElementById('copyBtn').addEventListener('click', () => { closeRecipeMoreMenu(); copyToClipboard(); });
+        document.getElementById('addToCollectionBtn').addEventListener('click', () => { closeRecipeMoreMenu(); openAddToCollectionModal(); });
     }
 
     function printRecipe() {
@@ -550,6 +620,10 @@ document.addEventListener('DOMContentLoaded', function () {
             showRecipeResult(result.recipe, result);
         } catch (err) {
             if (err.name === 'AbortError') return;
+            if (isIngredientValidationError(err.message)) {
+                showFormValidationError(err.message);
+                return;
+            }
             showResultsError(err.message, true);
             scrollToResults();
         }
@@ -564,6 +638,10 @@ document.addEventListener('DOMContentLoaded', function () {
             showTipsResult(result.cookingTips);
         } catch (err) {
             if (err.name === 'AbortError') return;
+            if (isIngredientValidationError(err.message)) {
+                showFormValidationError(err.message);
+                return;
+            }
             showResultsError(err.message, true);
             scrollToResults();
         }
@@ -571,12 +649,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
     document.getElementById('clearRecipeBtn').addEventListener('click', async () => {
         if (!(await showConfirm('Clear the form and current recipe?'))) return;
-        els.results.innerHTML = emptyResultsPlaceholder();
+        els.results.replaceChildren();
         document.getElementById('ingredients').value = '';
         document.getElementById('cuisine').value = '';
         document.getElementById('dietaryRestrictions').value = '';
+        els.preferencesPanel.open = false;
         hideFormError();
-        hideResultsError();
+        hideResultsPanel();
         sessionStorage.removeItem(STORAGE_LAST_RECIPE);
         currentRecipe = null;
         currentRecipeId = null;
@@ -601,11 +680,10 @@ document.addEventListener('DOMContentLoaded', function () {
     function showFavoriteButton(isSaved) {
         const btn = document.getElementById('favoriteBtn');
         if (!btn) return;
+        btn.classList.toggle('is-saved', isSaved);
         btn.innerHTML = isSaved
-            ? '<i class="fas fa-heart mr-2" aria-hidden="true"></i>Remove from Saved'
-            : '<i class="fas fa-heart mr-2" aria-hidden="true"></i>Save to Saved';
-        btn.className = (isSaved ? 'bg-gray-500 hover:bg-gray-600' : 'bg-red-500 hover:bg-red-600')
-            + ' text-white font-semibold py-2 px-4 rounded-lg text-sm';
+            ? '<i class="fas fa-heart" aria-hidden="true"></i><span>Remove from Saved</span>'
+            : '<i class="fas fa-heart" aria-hidden="true"></i><span>Save to Saved</span>';
     }
 
     async function openAddToCollectionModal() {

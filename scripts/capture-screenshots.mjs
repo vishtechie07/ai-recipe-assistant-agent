@@ -18,13 +18,14 @@ async function main() {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(400);
   await capture(page, '01-home.png');
 
   await page.fill('#ingredients', 'chicken, garlic, lemon, olive oil');
-  await page.selectOption('#cuisine', { index: 1 }).catch(() => {});
   await page.click('#generateBtn');
-  await page.waitForSelector('#results:not(.hidden) .recipe-title', { timeout: 120000 });
-  await page.waitForTimeout(800);
+  await page.waitForSelector('#resultsPanel:not(.hidden) .recipe-title', { timeout: 120000 });
+  await page.locator('#resultsPanel').scrollIntoViewIfNeeded();
+  await page.waitForTimeout(600);
   await capture(page, '02-recipe-result.png');
 
   await page.click('#libraryBtn');

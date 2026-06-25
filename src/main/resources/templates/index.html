@@ -10,43 +10,46 @@
 </head>
 <body class="bg-gradient-to-br from-orange-50 to-amber-100 min-h-screen">
     <header class="bg-white shadow-sm sticky top-0 z-40 border-b border-orange-100">
-        <div class="max-w-3xl mx-auto px-4 sm:px-6 py-4">
-            <div class="flex flex-wrap justify-between items-center gap-3">
-                <div class="flex items-center min-w-0">
-                    <i class="fas fa-utensils text-2xl text-primary-600 mr-3 shrink-0" aria-hidden="true"></i>
-                    <h1 class="text-xl sm:text-2xl font-bold text-gray-900 truncate">AI Recipe Assistant</h1>
-                </div>
-                <div class="flex items-center gap-2 sm:gap-3 flex-wrap">
-                    <div id="headerTrialBadge"
-                         th:classappend="${defaultKeyAvailable and !hasApiKey} ? '' : ' hidden'"
-                         class="flex items-center gap-2 bg-amber-50 border border-amber-300 rounded-full px-3 py-1.5 text-sm"
-                         aria-live="polite">
-                        <i class="fas fa-gift text-amber-600" aria-hidden="true"></i>
-                        <span id="headerTrialText" class="font-semibold text-amber-900 whitespace-nowrap"
-                              th:text="|${defaultTrialsRemaining} of ${defaultRecipesMax} free left|">5 of 5 free left</span>
-                        <div class="w-14 h-1.5 bg-amber-200 rounded-full overflow-hidden hidden sm:block">
-                            <div id="headerTrialProgress" class="bg-amber-600 h-full rounded-full transition-all duration-300"
-                                 th:style="'width:' + (${defaultRecipesMax} > 0 ? (${defaultRecipesUsed} * 100 / ${defaultRecipesMax}) : 0) + '%'"></div>
-                        </div>
-                        <button type="button" id="trialHowBtn" class="text-xs text-amber-800 underline font-medium whitespace-nowrap" title="How the free trial works">How it works</button>
-                    </div>
-                    <button id="libraryBtn" type="button"
-                        class="bg-primary-600 hover:bg-primary-700 text-white font-semibold py-2 px-4 rounded-lg flex items-center"
-                        aria-label="Open recipe library">
-                        <i class="fas fa-book-open mr-2" aria-hidden="true"></i>Library
-                        <span id="libraryCount" class="ml-2 bg-white text-primary-600 text-xs font-bold px-2 py-0.5 rounded-full">0</span>
-                    </button>
-                </div>
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
+            <div class="app-header-brand min-w-0">
+                <span class="app-header-brand-icon" aria-hidden="true">
+                    <i class="fas fa-utensils text-lg text-primary-600"></i>
+                </span>
+                <h1 class="text-lg sm:text-xl font-bold text-gray-900 truncate leading-tight">AI Recipe Assistant</h1>
             </div>
+            <button id="libraryBtn" type="button"
+                class="header-library-btn shrink-0"
+                aria-label="Open recipe library">
+                <i class="fas fa-book-open" aria-hidden="true"></i>
+                <span class="hidden sm:inline">Library</span>
+                <span id="libraryCount" class="header-library-count">0</span>
+            </button>
         </div>
     </header>
 
-    <main class="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+    <main class="max-w-3xl mx-auto px-4 sm:px-6 py-5 sm:py-7">
+        <div id="headerTrialBadge"
+             th:classappend="${defaultKeyAvailable and !hasApiKey} ? '' : ' hidden'"
+             class="trial-status-banner mb-5"
+             aria-live="polite">
+            <div class="trial-status-banner-main">
+                <i class="fas fa-gift text-amber-600" aria-hidden="true"></i>
+                <span id="headerTrialText" class="font-semibold text-amber-950 text-sm"
+                      th:text="|${defaultTrialsRemaining} of ${defaultRecipesMax} free left|">5 of 5 free left</span>
+            </div>
+            <div class="trial-status-banner-progress" aria-hidden="true">
+                <div id="headerTrialProgress" class="trial-status-banner-progress-fill"
+                     th:style="'width:' + (${defaultRecipesMax} > 0 ? (100 - ${defaultRecipesUsed} * 100 / ${defaultRecipesMax}) : 100) + '%'"></div>
+            </div>
+            <button type="button" id="trialHowBtn" class="trial-status-banner-link" title="How the free trial works">How it works</button>
+        </div>
         <details id="apiKeyPanel" class="bg-white rounded-xl shadow-md mb-6 group border border-gray-100"
                  th:attr="open=${!defaultKeyAvailable and !hasApiKey} ? 'open' : null">
             <summary class="cursor-pointer list-none p-4 sm:p-5 flex items-center justify-between gap-3 select-none">
                 <div class="flex items-center gap-3 min-w-0">
-                    <i class="fas fa-key text-primary-600 shrink-0" aria-hidden="true"></i>
+                    <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-orange-50" aria-hidden="true">
+                        <i class="fas fa-key text-primary-600"></i>
+                    </span>
                     <div class="min-w-0">
                         <span id="apiKeyPanelTitle" class="font-bold text-gray-900">API Key</span>
                         <span id="apiKeyPanelSubtitle" class="text-sm text-gray-500 ml-2"></span>
@@ -107,16 +110,18 @@
         </details>
 
         <div class="space-y-6">
-            <section class="bg-white rounded-xl shadow-md p-5 sm:p-7 border border-gray-100">
-                <h2 class="text-xl font-bold text-gray-900 mb-1 flex items-center">
-                    <i class="fas fa-magic text-primary-600 mr-2" aria-hidden="true"></i>Create Your Recipe
+            <section class="bg-white rounded-xl shadow-md px-5 py-6 sm:px-7 sm:py-7 border border-gray-100">
+                <h2 class="section-heading text-xl font-bold text-gray-900 mb-1">
+                    <i class="fas fa-magic text-primary-600" aria-hidden="true"></i>
+                    <span>Create Your Recipe</span>
                 </h2>
-                <p class="text-sm text-gray-500 mb-5">List what you have — we'll suggest a full recipe.</p>
+                <p class="text-sm text-gray-500 mb-5 leading-relaxed">List what you have — we'll suggest a full recipe.</p>
 
                 <form id="recipeForm" class="space-y-5" novalidate>
                     <div>
-                        <label for="ingredients" class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-carrot mr-1 text-primary-600" aria-hidden="true"></i>Available Ingredients
+                        <label for="ingredients" class="field-label text-sm font-medium text-gray-700">
+                            <i class="fas fa-carrot text-primary-600" aria-hidden="true"></i>
+                            <span>Available Ingredients</span>
                         </label>
                         <textarea id="ingredients" name="ingredients" rows="3" required
                             class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 resize-none"
@@ -133,9 +138,17 @@
                         </div>
                     </div>
 
+                    <details id="preferencesPanel" class="preferences-panel group">
+                        <summary class="preferences-panel-summary">
+                            <i class="fas fa-sliders text-primary-600" aria-hidden="true"></i>
+                            <span>Preferences <span class="text-gray-400 font-normal">(optional)</span></span>
+                            <i class="fas fa-chevron-down preferences-panel-chevron" aria-hidden="true"></i>
+                        </summary>
+                        <div class="preferences-panel-body space-y-4">
                     <div>
-                        <label for="cuisine" class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-globe mr-1 text-primary-600" aria-hidden="true"></i>Cuisine (optional)
+                        <label for="cuisine" class="field-label text-sm font-medium text-gray-700">
+                            <i class="fas fa-globe text-primary-600" aria-hidden="true"></i>
+                            <span>Cuisine</span>
                         </label>
                         <select id="cuisine" name="cuisine"
                             class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
@@ -155,37 +168,36 @@
                     </div>
 
                     <div>
-                        <label for="dietaryRestrictions" class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-leaf mr-1 text-green-600" aria-hidden="true"></i>Dietary needs (optional)
+                        <label for="dietaryRestrictions" class="field-label text-sm font-medium text-gray-700">
+                            <i class="fas fa-leaf text-green-600" aria-hidden="true"></i>
+                            <span>Dietary needs</span>
                         </label>
                         <input type="text" id="dietaryRestrictions" name="dietaryRestrictions"
                             class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                             placeholder="e.g. vegetarian, gluten-free">
                     </div>
+                        </div>
+                    </details>
 
-                    <div id="generationBlockedNotice" class="hidden p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900" role="status">
-                        <i class="fas fa-lock mr-1" aria-hidden="true"></i>
+                    <div id="generationBlockedNotice" class="hidden flex flex-wrap items-center gap-x-1.5 gap-y-1 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900" role="status">
+                        <i class="fas fa-lock text-amber-700" aria-hidden="true"></i>
                         <span id="generationBlockedText"></span>
-                        <button type="button" id="openApiKeyFromNotice" class="underline font-medium ml-1">Add API key</button>
+                        <button type="button" id="openApiKeyFromNotice" class="underline font-medium">Add API key</button>
                     </div>
 
-                    <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-start">
+                    <div class="action-btn-row">
                         <button type="submit" id="generateBtn"
-                            class="w-full sm:flex-[2] bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-lg flex items-center justify-center shadow-sm">
+                            class="btn-action w-full bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg shadow-sm">
                             <i class="fas fa-wand-magic-sparkles mr-2" aria-hidden="true"></i>Generate Recipe
                         </button>
-                        <div class="w-full sm:flex-1 flex flex-col gap-1">
-                            <button type="button" id="tipsBtn"
-                                class="w-full bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 font-medium py-3 px-4 rounded-lg flex items-center justify-center text-sm">
-                                <i class="fas fa-lightbulb mr-2 text-amber-500" aria-hidden="true"></i>Tips only
-                            </button>
-                            <p id="tipsTrialNotice" class="hidden text-xs text-amber-700 text-center sm:text-left">
-                                <i class="fas fa-exclamation-circle mr-0.5" aria-hidden="true"></i>Counts toward your free trial
-                            </p>
-                        </div>
+                        <button type="button" id="tipsBtn"
+                            class="btn-action w-full bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-800 font-semibold rounded-lg text-sm">
+                            <i class="fas fa-lightbulb mr-2 text-amber-500" aria-hidden="true"></i>Tips only
+                        </button>
                     </div>
-                    <button type="button" id="clearRecipeBtn" class="text-sm text-gray-500 hover:text-red-600 font-medium">
-                        <i class="fas fa-eraser mr-1" aria-hidden="true"></i>Clear form &amp; recipe
+                    <button type="button" id="clearRecipeBtn" class="text-link-btn text-sm text-gray-500 hover:text-red-600 font-medium">
+                        <i class="fas fa-eraser" aria-hidden="true"></i>
+                        <span>Clear form &amp; recipe</span>
                     </button>
                 </form>
 
@@ -197,14 +209,16 @@
                 </div>
             </section>
 
-            <section class="bg-white rounded-xl shadow-md p-5 sm:p-7 border border-gray-100" id="resultsPanel" aria-busy="false">
-                <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
-                    <h2 class="text-xl font-bold text-gray-900 flex items-center">
-                        <i class="fas fa-clipboard-list text-primary-600 mr-2" aria-hidden="true"></i>Your Recipe
+            <section class="bg-white rounded-xl shadow-md px-5 py-6 sm:px-7 sm:py-7 border border-gray-100 hidden" id="resultsPanel" aria-busy="false">
+                <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                    <h2 class="section-heading text-xl font-bold text-gray-900">
+                        <i class="fas fa-clipboard-list text-primary-600" aria-hidden="true"></i>
+                        <span>Your Recipe</span>
                     </h2>
                     <button type="button" id="cancelGenerateBtn"
-                        class="hidden text-sm text-red-600 hover:text-red-800 font-medium px-3 py-1 rounded-lg border border-red-200 hover:bg-red-50">
-                        <i class="fas fa-times mr-1" aria-hidden="true"></i>Cancel
+                        class="hidden inline-hint text-sm text-red-600 hover:text-red-800 font-medium px-3 py-1.5 rounded-lg border border-red-200 hover:bg-red-50">
+                        <i class="fas fa-times" aria-hidden="true"></i>
+                        <span>Cancel</span>
                     </button>
                 </div>
 
@@ -235,12 +249,7 @@
                     </div>
                 </div>
 
-                <div id="results" class="min-h-[120px] recipe-fade-in">
-                    <div class="text-center text-gray-500 py-10">
-                        <i class="fas fa-utensils text-4xl mb-3 text-gray-300" aria-hidden="true"></i>
-                        <p>Add ingredients above and hit <strong>Generate Recipe</strong>.</p>
-                    </div>
-                </div>
+                <div id="results" class="recipe-fade-in"></div>
             </section>
         </div>
     </main>
@@ -248,12 +257,11 @@
     <div id="trialInfoModal" class="fixed inset-0 bg-black/50 hidden z-50" role="dialog" aria-modal="true" aria-labelledby="trialInfoTitle">
         <div class="flex items-center justify-center min-h-screen p-4">
             <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-6" role="document">
-                <h3 id="trialInfoTitle" class="text-lg font-bold text-gray-900 mb-3">How the free trial works</h3>
+                <h3 id="trialInfoTitle" class="text-lg font-bold text-gray-900 mb-3">Free trial</h3>
                 <p id="trialInfoBody" class="text-sm text-gray-600 mb-4" th:text="${trialDeviceNotice}"></p>
                 <ul class="text-sm text-gray-600 space-y-2 mb-6 list-disc pl-5">
-                    <li>Recipe generation, <strong>Tips only</strong>, and <strong>Try another</strong> each use one trial credit.</li>
-                    <li>Counted per device (browser cookie), not per tab.</li>
-                    <li>Clearing cookies resets your trial count.</li>
+                    <li>Generate, <strong>Tips only</strong>, and <strong>Try another</strong> each use one credit.</li>
+                    <li>Ingredient checks do not use a credit.</li>
                 </ul>
                 <button type="button" id="closeTrialInfoBtn" class="w-full py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-medium">Got it</button>
             </div>

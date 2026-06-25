@@ -33,6 +33,7 @@ public class RecipeController {
     @Autowired private TrialClientService trialClientService;
     @Autowired private RecipeLibraryService recipeLibraryService;
     @Autowired private GenerationCancellationService cancellationService;
+    @Autowired private IngredientValidator ingredientValidator;
 
     @Value("${app.asset-version:1.0.0}")
     private String assetVersion;
@@ -147,6 +148,13 @@ public class RecipeController {
         try {
             cancellationService.register(clientId);
             Runnable checkCancelled = () -> cancellationService.throwIfCancelled(clientId);
+
+            ResponseEntity<RecipeResponse> ingredientRejection = rejectInvalidIngredients(
+                resolved.getApiKey(), request.getIngredients(), checkCancelled);
+            if (ingredientRejection != null) {
+                return ingredientRejection;
+            }
+
             StructuredRecipe recipe = openAIService.generateRecipe(
                 resolved.getApiKey(), request.getIngredients(), request.getCuisine(),
                 request.getDietaryRestrictions(), checkCancelled);
@@ -209,6 +217,13 @@ public class RecipeController {
         try {
             cancellationService.register(clientId);
             Runnable checkCancelled = () -> cancellationService.throwIfCancelled(clientId);
+
+            ResponseEntity<RecipeResponse> ingredientRejection = rejectInvalidIngredients(
+                resolved.getApiKey(), request.getIngredients(), checkCancelled);
+            if (ingredientRejection != null) {
+                return ingredientRejection;
+            }
+
             CookingTipsResult tips = openAIService.getCookingTips(
                 resolved.getApiKey(), request.getIngredients(), checkCancelled);
             cancellationService.throwIfCancelled(clientId);
@@ -273,5 +288,25 @@ public class RecipeController {
             .map(error -> error.getDefaultMessage())
             .findFirst()
             .orElse("Invalid request");
+    }
+
+    private ResponseEntity<RecipeResponse> rejectInvalidIngredients(String apiKey, String ingredients,
+                                                                    Runnable cancellationCheck) {
+        try {
+            IngredientValidationResult validation = ingredientValidator.validate(apiKey, ingredients, cancellationCheck);
+            if (!validation.valid()) {
+                return ResponseEntity.badRequest()
+                    .body(new RecipeResponse(false, null, validation.message()));
+            }
+            return null;
+        } catch (OpenAIClientException e) {
+            log.warn("Ingredient validation OpenAI error: status={}", e.getStatusCode());
+            if (e.isUnauthorized()) {
+                return ResponseEntity.badRequest()
+                    .body(new RecipeResponse(false, null, "Invalid OpenAI API key. Check your key in .env or the API Key field."));
+            }
+            return ResponseEntity.badRequest()
+                .body(new RecipeResponse(false, null, "Could not validate ingredients. Please try again."));
+        }
     }
 }

@@ -33,7 +33,7 @@ Most recipe demos stop at a chat box. This one is built like a small product:
 | Home | Recipe result | Cookbook library |
 |------|---------------|------------------|
 | ![Home screen](docs/screenshots/01-home.png) | ![Recipe result](docs/screenshots/02-recipe-result.png) | ![Library modal](docs/screenshots/03-library.png) |
-| Ingredient form with quick-add chips | Full structured recipe card | Collections shelf (My Recipes, Saved, custom) |
+| Trial banner + ingredient form | Structured recipe with Save / Try another | Collections shelf (My Recipes, Saved, custom) |
 
 ---
 
@@ -41,6 +41,7 @@ Most recipe demos stop at a chat box. This one is built like a small product:
 
 | Area | What you get |
 |------|----------------|
+| **Ingredient validation** | `gpt-4o-mini` pre-flight check — rejects non-food input; does **not** use a trial credit |
 | **Recipe generation** | OpenAI structured JSON → rich UI (steps, tips, nutrition) |
 | **Cooking tips** | Lighter endpoint for tip-only requests (uses a trial credit) |
 | **Free trial** | Server `OPENAI_API_KEY` + `ra_client_id` cookie — N recipes per device |
@@ -69,10 +70,11 @@ flowchart LR
     API --> DB
 ```
 
-1. User enters ingredients (optional cuisine / dietary notes).
-2. Backend resolves API key: **user session key** or **shared trial key** (if credits remain).
-3. OpenAI returns strict-schema JSON; backend persists recipe + links to **My Recipes**.
-4. User can heart → **Saved**, file into collections, or delete from library.
+1. User enters ingredients (optional preferences: cuisine / dietary).
+2. Backend validates ingredients via a lightweight OpenAI call (no trial charge if invalid).
+3. Backend resolves API key: **user session key** or **shared trial key** (if credits remain).
+4. OpenAI returns strict-schema JSON; backend persists recipe + links to **My Recipes**.
+5. User can heart → **Saved**, file into collections, or delete from library.
 
 ---
 
@@ -139,6 +141,7 @@ mvn test
 | `APP_SESSION_COOKIE_SECURE` | Prod: `true` | Secure cookies behind HTTPS proxy |
 | `APP_CORS_ALLOWED_ORIGINS` | Prod: **Yes** | Public URL(s), comma-separated |
 | `APP_DEFAULT_KEY_MAX_RECIPES` | No | Default `5` free generations per device |
+| `OPENAI_MODEL_VALIDATION` | No | `gpt-4o-mini` for ingredient pre-flight |
 
 `.env` in the project root is loaded at startup (gitignored). Use UTF-8 **without BOM** — a BOM breaks dotenv parsing on Windows.
 
@@ -229,6 +232,7 @@ Planned or recommended next steps — contributions welcome.
 - [ ] **Meal planning** — weekly board drag-and-drop from library
 
 ### AI & backend
+- [x] **Ingredient validation** — `gpt-4o-mini` pre-flight; invalid input rejected without trial charge
 - [ ] **Streaming generation** — SSE/WebSocket (partial cancel via `/cancel-generation` today)
 - [ ] **Cheaper key validation** — done via models list; optional org-scoped key checks later
 - [ ] **Model routing** — `gpt-4o` for recipes, `gpt-4o-mini` for tips
@@ -243,6 +247,7 @@ Planned or recommended next steps — contributions welcome.
 - [x] **BOM-safe `.env`** — custom loader strips UTF-8 BOM on Windows
 - [x] **Cheap API key validation** — `GET /v1/models` instead of a completion call
 - [x] **Cancellable generation** — `POST /cancel-generation` + no trial charge on cancel
+- [x] **E2E screenshots** — `scripts/capture-screenshots.mjs` (Playwright)
 - [ ] **E2E tests** — Playwright suite in CI
 - [ ] **Observability** — structured logs, metrics, OpenAI cost tracking per device/user
 
