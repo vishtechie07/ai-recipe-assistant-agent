@@ -26,10 +26,11 @@ Open your **Java app service** → **Variables** → add:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `OPENAI_API_KEY` | Yes (for free trial) | Shared demo key. **Never commit this.** Users get 5 recipes/session without their own key. |
+| `OPENAI_API_KEY` | Yes (for free trial) | Shared demo key. **Never commit this.** Users get 5 recipes per **device** (cookie) without their own key. |
 | `APP_ENCRYPTION_KEY` | Yes | Random string, **at least 32 characters**. Encrypts user API keys in session. Generate: `openssl rand -base64 32` |
 | `APP_SESSION_COOKIE_SECURE` | Recommended | Set to `true` so session cookies are HTTPS-only. **Do not use `SERVER_SSL_ENABLED`** — Spring Boot maps that to `server.ssl.enabled` and the app will crash without a keystore. |
 | `APP_CORS_ALLOWED_ORIGINS` | Recommended | Your public app URL, e.g. `https://your-app.up.railway.app` (comma-separated if multiple). |
+| `SPRING_PROFILES_ACTIVE` | Optional | Set to `prod` explicitly, or rely on auto-detect when `RAILWAY_ENVIRONMENT` is set. |
 | `SPRING_DATASOURCE_URL` | Yes | JDBC URL to Railway Postgres |
 | `SPRING_DATASOURCE_USERNAME` | Yes | DB user |
 | `SPRING_DATASOURCE_PASSWORD` | Yes | DB password |
@@ -40,7 +41,7 @@ Mark `OPENAI_API_KEY`, `APP_ENCRYPTION_KEY`, and `SPRING_DATASOURCE_PASSWORD` as
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APP_DEFAULT_KEY_MAX_RECIPES` | `5` | Free recipes per browser session when using the shared key |
+| `APP_DEFAULT_KEY_MAX_RECIPES` | `5` | Free recipes per **device** (browser cookie) when using the shared key |
 
 ## 4. Build & start commands
 
@@ -54,28 +55,29 @@ Confirm the JAR name in `pom.xml` `<artifactId>` if the start command fails.
 ## 5. Networking
 
 1. App service → **Settings** → **Networking** → **Generate domain**.
-2. Railway serves HTTPS at the edge; the app runs HTTP internally (`server.ssl.enabled=false` in the `prod` profile). Set `APP_SESSION_COOKIE_SECURE=true` for secure cookies.
+2. Railway serves HTTPS at the edge; the app runs HTTP internally (`server.ssl.enabled=false` in the `prod` profile). Set `APP_SESSION_COOKIE_SECURE=true` for secure cookies. The `prod` profile activates automatically when Railway env vars are present, or set `SPRING_PROFILES_ACTIVE=prod`.
 
 ## 6. OpenAI dashboard (recommended)
 
 On the **shared** `OPENAI_API_KEY` account:
 
 - Set a **monthly usage limit**.
-- Monitor usage; trial users share this key (5 recipes per browser session).
+- Monitor usage; trial users share this key (5 recipes per device by default).
 
-## 7. How keys work in production
+## 7. How keys and favorites work in production
 
 | User action | Behavior |
 |-------------|----------|
-| No user key, trial remaining | Server uses `OPENAI_API_KEY`; counts recipes in HTTP session |
-| No user key, 5 recipes used | Must add their own `sk-...` key in the UI |
+| No user key, trial remaining | Server uses `OPENAI_API_KEY`; counts per device cookie |
+| No user key, trial used | Must add their own `sk-...` key in the UI |
 | User sets own key | Their key is used; unlimited (subject to IP rate limit: 10 req/min) |
+| Save favorite | Stored in Postgres **Saved** collection (device library) |
 
 The default key is **never** sent to the browser.
 
 ## 8. Multiple Railway instances
 
-Session counters live in server memory. If you scale to **more than one replica**, use **sticky sessions** or add **Spring Session + Redis** so trial counts stay accurate.
+Trial counters are stored in **PostgreSQL** (`trial_client_usage`), so multiple replicas share counts. Session-stored user API keys still require **sticky sessions** if you scale horizontally.
 
 ## 9. Verify after deploy
 
