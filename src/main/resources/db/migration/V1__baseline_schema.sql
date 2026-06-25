@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS recipes (
     updated_at TIMESTAMP
 );
 
+-- Existing Railway/Hibernate schemas may already have recipes without content_hash
+ALTER TABLE recipes ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64);
+
 CREATE INDEX IF NOT EXISTS idx_recipes_user_id ON recipes(user_id);
 CREATE INDEX IF NOT EXISTS idx_recipes_user_content_hash ON recipes(user_id, content_hash);
 
