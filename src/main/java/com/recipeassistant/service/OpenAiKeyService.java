@@ -1,6 +1,8 @@
 package com.recipeassistant.service;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -8,13 +10,15 @@ import org.springframework.stereotype.Service;
 public class OpenAiKeyService {
 
     public static final String SESSION_USER_KEY = "encrypted_openai_api_key";
-    public static final String SESSION_DEFAULT_RECIPE_COUNT = "default_recipe_count";
 
     @Value("${openai.api.default-key:}")
     private String defaultApiKey;
 
     @Value("${app.default-key.max-recipes-per-session:5}")
     private int maxDefaultRecipesPerSession;
+
+    @Autowired
+    private TrialClientService trialClientService;
 
     public boolean isDefaultKeyConfigured() {
         return defaultApiKey != null && !defaultApiKey.isBlank();
@@ -24,31 +28,31 @@ public class OpenAiKeyService {
         return session.getAttribute(SESSION_USER_KEY) != null;
     }
 
-    public int getDefaultRecipeCount(HttpSession session) {
-        Integer count = (Integer) session.getAttribute(SESSION_DEFAULT_RECIPE_COUNT);
-        return count == null ? 0 : count;
-    }
-
     public int getMaxDefaultRecipesPerSession() {
         return maxDefaultRecipesPerSession;
     }
 
-    public int getDefaultTrialsRemaining(HttpSession session) {
+    public int getDefaultRecipeCount(String clientId) {
+        return trialClientService.getRecipeCount(clientId);
+    }
+
+    public int getDefaultTrialsRemaining(String clientId) {
         if (!isDefaultKeyConfigured()) {
             return 0;
         }
-        return Math.max(0, maxDefaultRecipesPerSession - getDefaultRecipeCount(session));
+        return Math.max(0, maxDefaultRecipesPerSession - getDefaultRecipeCount(clientId));
     }
 
-    public int getDefaultRecipesUsed(HttpSession session) {
-        return getDefaultRecipeCount(session);
+    public int getDefaultRecipesUsed(String clientId) {
+        return getDefaultRecipeCount(clientId);
     }
 
-    public void incrementDefaultRecipeCount(HttpSession session) {
-        session.setAttribute(SESSION_DEFAULT_RECIPE_COUNT, getDefaultRecipeCount(session) + 1);
+    public void incrementDefaultRecipeCount(String clientId, HttpServletRequest request) {
+        trialClientService.incrementRecipeCount(clientId, request);
     }
 
-    public ResolvedKey resolveKey(HttpSession session, EncryptionService encryptionService, boolean countAgainstTrial) {
+    public ResolvedKey resolveKey(HttpSession session, String clientId, EncryptionService encryptionService,
+                                  boolean countAgainstTrial) {
         String encryptedUserKey = (String) session.getAttribute(SESSION_USER_KEY);
         if (encryptedUserKey != null) {
             String userKey = encryptionService.decrypt(encryptedUserKey);
@@ -62,10 +66,10 @@ public class OpenAiKeyService {
             return ResolvedKey.error("Please set your OpenAI API key first.");
         }
 
-        if (getDefaultRecipeCount(session) >= maxDefaultRecipesPerSession) {
+        if (getDefaultRecipeCount(clientId) >= maxDefaultRecipesPerSession) {
             return ResolvedKey.error(
-                "Free trial limit reached (" + maxDefaultRecipesPerSession + " recipes per session). "
-                    + "Add your own OpenAI API key to continue.");
+                "Free trial limit reached (" + maxDefaultRecipesPerSession
+                    + " recipes on this device). Add your own OpenAI API key to continue.");
         }
 
         return ResolvedKey.ok(defaultApiKey.trim(), KeySource.DEFAULT, countAgainstTrial);

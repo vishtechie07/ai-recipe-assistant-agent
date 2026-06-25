@@ -38,9 +38,9 @@ public class Recipe {
     private Integer cookTime;
     
     private Integer servings;
-    
-    @Column(name = "is_favorite")
-    private Boolean isFavorite = false;
+
+    @Column(name = "content_hash", length = 64)
+    private String contentHash;
     
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
@@ -142,13 +142,13 @@ public class Recipe {
     public void setServings(Integer servings) {
         this.servings = servings;
     }
-    
-    public Boolean getIsFavorite() {
-        return isFavorite;
+
+    public String getContentHash() {
+        return contentHash;
     }
-    
-    public void setIsFavorite(Boolean favorite) {
-        isFavorite = favorite;
+
+    public void setContentHash(String contentHash) {
+        this.contentHash = contentHash;
     }
     
     public LocalDateTime getCreatedAt() {
@@ -178,7 +178,6 @@ public class Recipe {
                 "id=" + id +
                 ", title='" + title + '\'' +
                 ", cuisine='" + cuisine + '\'' +
-                ", isFavorite=" + isFavorite +
                 ", createdAt=" + createdAt +
                 '}';
     }

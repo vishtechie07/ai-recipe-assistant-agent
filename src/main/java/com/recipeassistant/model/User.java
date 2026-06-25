@@ -20,6 +20,9 @@ public class User {
     
     @Column(name = "last_login")
     private LocalDateTime lastLogin;
+
+    @Column(name = "client_id", unique = true, length = 36)
+    private String clientId;
     
     // Default constructor
     public User() {
@@ -63,6 +66,14 @@ public class User {
     
     public void setLastLogin(LocalDateTime lastLogin) {
         this.lastLogin = lastLogin;
+    }
+
+    public String getClientId() {
+        return clientId;
+    }
+
+    public void setClientId(String clientId) {
+        this.clientId = clientId;
     }
     
     @Override

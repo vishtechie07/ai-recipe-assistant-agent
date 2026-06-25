@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -17,11 +18,8 @@ public interface RecipeRepository extends JpaRepository<Recipe, UUID> {
      * Find recipes by user
      */
     List<Recipe> findByUserOrderByCreatedAtDesc(User user);
-    
-    /**
-     * Find favorite recipes by user
-     */
-    List<Recipe> findByUserAndIsFavoriteTrueOrderByCreatedAtDesc(User user);
+
+    Optional<Recipe> findByUserAndContentHash(User user, String contentHash);
     
     /**
      * Find recipes by cuisine and user
@@ -39,9 +37,4 @@ public interface RecipeRepository extends JpaRepository<Recipe, UUID> {
      * Count recipes by user
      */
     long countByUser(User user);
-    
-    /**
-     * Count favorite recipes by user
-     */
-    long countByUserAndIsFavoriteTrue(User user);
 }
