@@ -9,6 +9,8 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CsrfFilter;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.util.StringUtils;
@@ -24,14 +26,30 @@ import java.util.stream.Collectors;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    private static final String CONTENT_SECURITY_POLICY =
+        "default-src 'self'; "
+            + "script-src 'self'; "
+            + "style-src 'self' https://cdnjs.cloudflare.com; "
+            + "font-src 'self' https://cdnjs.cloudflare.com data:; "
+            + "img-src 'self' data:; "
+            + "connect-src 'self'; "
+            + "frame-ancestors 'none'; "
+            + "base-uri 'self'; "
+            + "form-action 'self'";
+
     @Value("${app.cors.allowed-origins:http://localhost:8080}")
     private String allowedOrigins;
+
+    @Value("${server.servlet.session.cookie.secure:false}")
+    private boolean secureCookies;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
             .csrf(csrf -> csrf
-                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
+                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))
+            .addFilterAfter(new CsrfCookieFilter(), CsrfFilter.class)
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
@@ -41,11 +59,20 @@ public class SecurityConfig {
                 .requestMatchers("/", "/css/**", "/js/**", "/images/**", "/favicon.ico").permitAll()
                 .requestMatchers("/api-key-status").permitAll()
                 .anyRequest().permitAll())
-            .headers(headers -> headers
-                .frameOptions(frame -> frame.deny())
-                .contentTypeOptions(Customizer.withDefaults())
-                .referrerPolicy(referrer -> referrer.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
-                .xssProtection(xss -> xss.disable()))
+            .headers(headers -> {
+                headers
+                    .frameOptions(frame -> frame.deny())
+                    .contentTypeOptions(Customizer.withDefaults())
+                    .referrerPolicy(referrer -> referrer.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
+                    .contentSecurityPolicy(csp -> csp.policyDirectives(CONTENT_SECURITY_POLICY))
+                    .permissionsPolicy(permissions -> permissions.policy(
+                        "camera=(), microphone=(), geolocation=(), payment=()"));
+                if (secureCookies) {
+                    headers.httpStrictTransportSecurity(hsts -> hsts
+                        .maxAgeInSeconds(31_536_000)
+                        .includeSubDomains(true));
+                }
+            })
             .httpBasic(AbstractHttpConfigurer::disable)
             .formLogin(AbstractHttpConfigurer::disable)
             .logout(logout -> logout
@@ -65,7 +92,7 @@ public class SecurityConfig {
             .filter(StringUtils::hasText)
             .collect(Collectors.toList());
         configuration.setAllowedOrigins(origins);
-        configuration.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Content-Type", "X-XSRF-TOKEN", "X-Requested-With"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);

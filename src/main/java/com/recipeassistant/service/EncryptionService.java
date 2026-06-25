@@ -1,5 +1,6 @@
 package com.recipeassistant.service;
 
+import com.recipeassistant.security.SecurityConstants;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -32,6 +33,10 @@ public class EncryptionService {
         if (encryptionKey == null || encryptionKey.length() < MIN_KEY_LENGTH) {
             throw new IllegalStateException(
                 "app.encryption.key (APP_ENCRYPTION_KEY) must be at least " + MIN_KEY_LENGTH + " characters");
+        }
+        if (SecurityConstants.INSECURE_PLACEHOLDER_ENCRYPTION_KEY.equals(encryptionKey)) {
+            throw new IllegalStateException(
+                "APP_ENCRYPTION_KEY is still the insecure placeholder. Set a unique secret in .env or environment variables.");
         }
         try {
             byte[] keyBytes = MessageDigest.getInstance("SHA-256")
