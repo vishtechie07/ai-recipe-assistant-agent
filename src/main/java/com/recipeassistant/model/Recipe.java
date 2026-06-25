@@ -28,7 +28,7 @@ public class Recipe {
     @Column(length = 100)
     private String cuisine;
     
-    @Column(columnDefinition = "TEXT")
+    @Column(name = "dietary_restrictions", columnDefinition = "TEXT")
     private String dietaryRestrictions;
     
     @Column(name = "prep_time")
