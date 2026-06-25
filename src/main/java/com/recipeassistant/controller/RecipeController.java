@@ -1,58 +1,53 @@
 package com.recipeassistant.controller;
 
-import com.recipeassistant.model.ApiKeyRequest;
-import com.recipeassistant.model.FavoriteRequest;
-import com.recipeassistant.model.RecipeRequest;
-import com.recipeassistant.model.RecipeResponse;
-import com.recipeassistant.model.SaveRecipeRequest;
+import com.recipeassistant.model.*;
+import com.recipeassistant.service.*;
+import com.recipeassistant.util.ClientIpResolver;
+import com.recipeassistant.util.ContentHashUtil;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.recipeassistant.service.OpenAIService;
-import com.recipeassistant.service.OpenAiKeyService;
-import com.recipeassistant.service.SecurityAuditService;
-import com.recipeassistant.service.EncryptionService;
-import com.recipeassistant.service.DatabaseService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.*;
 
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpSession;
-import jakarta.validation.Valid;
-import java.util.UUID;
-
 @Controller
 public class RecipeController {
 
     private static final Logger log = LoggerFactory.getLogger(RecipeController.class);
     private static final String GENERIC_ERROR = "An error occurred. Please try again later.";
+    private static final String TRIAL_DEVICE_NOTICE =
+        "Free trial is tracked per device (browser cookie), not per session. Clearing cookies resets the trial.";
 
-    @Autowired
-    private OpenAIService openAIService;
-    
-    @Autowired
-    private SecurityAuditService securityAuditService;
-    
-    @Autowired
-    private EncryptionService encryptionService;
-    
-    @Autowired
-    private DatabaseService databaseService;
+    @Autowired private OpenAIService openAIService;
+    @Autowired private SecurityAuditService securityAuditService;
+    @Autowired private EncryptionService encryptionService;
+    @Autowired private OpenAiKeyService openAiKeyService;
+    @Autowired private TrialClientService trialClientService;
+    @Autowired private RecipeLibraryService recipeLibraryService;
+    @Autowired private GenerationCancellationService cancellationService;
 
-    @Autowired
-    private OpenAiKeyService openAiKeyService;
+    @Value("${app.asset-version:1.0.0}")
+    private String assetVersion;
 
     @GetMapping("/")
-    public String index(Model model, HttpSession session) {
+    public String index(Model model, HttpSession session, HttpServletRequest request, HttpServletResponse response) {
+        String clientId = trialClientService.ensureClientId(request, response);
         model.addAttribute("recipeRequest", new RecipeRequest());
         model.addAttribute("hasApiKey", openAiKeyService.hasUserKey(session));
         model.addAttribute("defaultKeyAvailable", openAiKeyService.isDefaultKeyConfigured());
-        model.addAttribute("defaultTrialsRemaining", openAiKeyService.getDefaultTrialsRemaining(session));
+        model.addAttribute("defaultTrialsRemaining", openAiKeyService.getDefaultTrialsRemaining(clientId));
         model.addAttribute("defaultRecipesMax", openAiKeyService.getMaxDefaultRecipesPerSession());
-        model.addAttribute("defaultRecipesUsed", openAiKeyService.getDefaultRecipesUsed(session));
+        model.addAttribute("defaultRecipesUsed", openAiKeyService.getDefaultRecipesUsed(clientId));
+        model.addAttribute("trialDeviceNotice", TRIAL_DEVICE_NOTICE);
+        model.addAttribute("assetVersion", assetVersion);
         return "index";
     }
 
@@ -63,34 +58,21 @@ public class RecipeController {
                                                    HttpSession session,
                                                    HttpServletRequest httpRequest) {
         if (bindingResult.hasErrors()) {
-            String errorMessage = bindingResult.getFieldErrors().stream()
-                .map(error -> error.getDefaultMessage())
-                .findFirst()
-                .orElse("Invalid API key");
             return ResponseEntity.badRequest()
-                .body(new RecipeResponse(false, null, errorMessage));
+                .body(new RecipeResponse(false, null, validationMessage(bindingResult)));
         }
         try {
-            String testResult = openAIService.testApiKey(request.getApiKey());
-            if (testResult != null) {
-                // Encrypt and store API key securely
-                String encryptedApiKey = encryptionService.encrypt(request.getApiKey());
-                session.setAttribute(OpenAiKeyService.SESSION_USER_KEY, encryptedApiKey);
-                session.setAttribute("api_key_set_time", System.currentTimeMillis());
-                
-                // Log successful API key setup (without exposing the key)
-                securityAuditService.logApiKeySet(getClientIpAddress(httpRequest));
-                
+            if (openAIService.validateApiKey(request.getApiKey())) {
+                session.setAttribute(OpenAiKeyService.SESSION_USER_KEY, encryptionService.encrypt(request.getApiKey()));
+                securityAuditService.logApiKeySet(ClientIpResolver.resolve(httpRequest));
                 return ResponseEntity.ok(new RecipeResponse(true, "API key encrypted and stored successfully!", null));
-            } else {
-                return ResponseEntity.badRequest()
-                    .body(new RecipeResponse(false, null, "Invalid API key. Please check and try again."));
             }
+            return ResponseEntity.badRequest()
+                .body(new RecipeResponse(false, null, "Invalid API key. Please check and try again."));
         } catch (Exception e) {
-            log.warn("API key validation failed for {}", getClientIpAddress(httpRequest), e);
-            securityAuditService.logApiKeyValidationFailed(getClientIpAddress(httpRequest), "validation error");
-            return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, GENERIC_ERROR));
+            log.warn("API key validation failed for {}", ClientIpResolver.resolve(httpRequest));
+            securityAuditService.logApiKeyValidationFailed(ClientIpResolver.resolve(httpRequest), "validation error");
+            return ResponseEntity.internalServerError().body(new RecipeResponse(false, null, GENERIC_ERROR));
         }
     }
 
@@ -98,326 +80,198 @@ public class RecipeController {
     @ResponseBody
     public RecipeResponse clearApiKey(HttpSession session) {
         session.removeAttribute(OpenAiKeyService.SESSION_USER_KEY);
-        session.removeAttribute("api_key_set_time");
         return new RecipeResponse(true, "API key cleared successfully!", null);
     }
 
     @GetMapping("/api-key-status")
     @ResponseBody
-    public RecipeResponse getApiKeyStatus(HttpSession session) {
-        RecipeResponse response = new RecipeResponse();
+    public RecipeResponse getApiKeyStatus(HttpSession session, HttpServletRequest request, HttpServletResponse response) {
+        String clientId = trialClientService.ensureClientId(request, response);
+        RecipeResponse apiResponse = new RecipeResponse();
         boolean hasUserKey = openAiKeyService.hasUserKey(session);
-        populateTrialFields(response, session);
-        response.setHasUserKey(hasUserKey);
+        populateTrialFields(apiResponse, clientId);
+        apiResponse.setHasUserKey(hasUserKey);
+        apiResponse.setTrialDeviceNotice(TRIAL_DEVICE_NOTICE);
 
         if (hasUserKey) {
-            response.setSuccess(true);
-            response.setContent("Your API key is set. Unlimited recipe generation.");
-            response.setKeySource("user");
-            return response;
+            apiResponse.setSuccess(true);
+            apiResponse.setContent("Your API key is set. Unlimited recipe generation.");
+            apiResponse.setKeySource("user");
+            return apiResponse;
         }
 
         if (openAiKeyService.isDefaultKeyConfigured()) {
-            int remaining = openAiKeyService.getDefaultTrialsRemaining(session);
-            response.setKeySource("default");
-            if (remaining > 0) {
-                response.setSuccess(true);
-                response.setContent("Free trial: " + remaining + " recipe(s) remaining. Add your key for unlimited use.");
-            } else {
-                response.setSuccess(false);
-                response.setError("Free trial used up for this session. Add your OpenAI API key to continue.");
+            int remaining = openAiKeyService.getDefaultTrialsRemaining(clientId);
+            apiResponse.setKeySource("default");
+            apiResponse.setSuccess(remaining > 0);
+            apiResponse.setContent(remaining > 0
+                ? "Free trial: " + remaining + " recipe(s) remaining on this device."
+                : null);
+            if (remaining == 0) {
+                apiResponse.setError("Free trial used on this device. Add your OpenAI API key to continue.");
             }
-            return response;
+            return apiResponse;
         }
 
-        response.setSuccess(false);
-        response.setError("No API key configured. Add your OpenAI API key to generate recipes.");
-        return response;
+        apiResponse.setSuccess(false);
+        apiResponse.setError("No API key configured. Add your OpenAI API key to generate recipes.");
+        return apiResponse;
+    }
+
+    @PostMapping("/cancel-generation")
+    @ResponseBody
+    public ResponseEntity<RecipeResponse> cancelGeneration(HttpServletRequest httpRequest,
+                                                           HttpServletResponse httpResponse) {
+        String clientId = trialClientService.ensureClientId(httpRequest, httpResponse);
+        cancellationService.requestCancel(clientId);
+        return ResponseEntity.ok(new RecipeResponse(true, "Cancellation requested.", null));
     }
 
     @PostMapping("/generate-recipe")
     @ResponseBody
-    public ResponseEntity<RecipeResponse> generateRecipe(@Valid @RequestBody RecipeRequest request, 
+    public ResponseEntity<RecipeResponse> generateRecipe(@Valid @RequestBody RecipeRequest request,
                                                         BindingResult bindingResult,
                                                         HttpSession session,
-                                                        HttpServletRequest httpRequest) {
-        // Check for validation errors
+                                                        HttpServletRequest httpRequest,
+                                                        HttpServletResponse httpResponse) {
         if (bindingResult.hasErrors()) {
-            String errorMessage = bindingResult.getFieldErrors().stream()
-                .map(error -> error.getField() + ": " + error.getDefaultMessage())
-                .findFirst()
-                .orElse("Validation error");
-            securityAuditService.logInvalidInput(getClientIpAddress(httpRequest), "/generate-recipe", errorMessage);
-            return ResponseEntity.badRequest()
-                .body(new RecipeResponse(false, null, errorMessage));
+            return ResponseEntity.badRequest().body(new RecipeResponse(false, null, "Invalid recipe request."));
         }
-        
-        OpenAiKeyService.ResolvedKey resolved = openAiKeyService.resolveKey(session, encryptionService, true);
+
+        String clientId = trialClientService.ensureClientId(httpRequest, httpResponse);
+        OpenAiKeyService.ResolvedKey resolved = openAiKeyService.resolveKey(session, clientId, encryptionService, true);
         if (!resolved.isValid()) {
-            int status = openAiKeyService.isDefaultKeyConfigured() && !openAiKeyService.hasUserKey(session)
-                && openAiKeyService.getDefaultTrialsRemaining(session) == 0 ? 429 : 401;
-            RecipeResponse body = new RecipeResponse(false, null, resolved.getErrorMessage());
-            populateTrialFields(body, session);
-            return ResponseEntity.status(status).body(body);
+            return trialDenied(resolved, clientId, session);
         }
 
         try {
-            String recipe = openAIService.generateRecipe(
-                resolved.getApiKey(), request.getIngredients(), request.getCuisine(), request.getDietaryRestrictions());
+            cancellationService.register(clientId);
+            Runnable checkCancelled = () -> cancellationService.throwIfCancelled(clientId);
+            StructuredRecipe recipe = openAIService.generateRecipe(
+                resolved.getApiKey(), request.getIngredients(), request.getCuisine(),
+                request.getDietaryRestrictions(), checkCancelled);
+            cancellationService.throwIfCancelled(clientId);
             if (resolved.isIncrementTrialOnSuccess()) {
-                openAiKeyService.incrementDefaultRecipeCount(session);
+                openAiKeyService.incrementDefaultRecipeCount(clientId, httpRequest);
             }
-            securityAuditService.logRecipeGeneration(getClientIpAddress(httpRequest), request.getIngredients());
-            RecipeResponse body = new RecipeResponse(true, recipe, null);
-            body.setKeySource(resolved.getSource().name().toLowerCase());
-            body.setHasUserKey(openAiKeyService.hasUserKey(session));
-            populateTrialFields(body, session);
+            securityAuditService.logRecipeGeneration(ClientIpResolver.resolve(httpRequest), request.getIngredients());
+            String recipeJson = openAIService.recipeToJson(recipe);
+            String contentHash = ContentHashUtil.sha256(recipeJson);
+            Recipe saved = recipeLibraryService.persistGeneratedRecipe(
+                clientId, recipe, recipeJson, contentHash,
+                request.getIngredients(), request.getCuisine(), request.getDietaryRestrictions()
+            );
+            RecipeResponse body = buildRecipeSuccess(recipe, resolved, clientId, session);
+            body.setRecipeId(saved.getId().toString());
+            body.setContentHash(contentHash);
+            body.setFavorited(recipeLibraryService.isInSavedCollection(clientId, saved));
             return ResponseEntity.ok(body);
+        } catch (GenerationCancelledException e) {
+            return ResponseEntity.status(499)
+                .body(new RecipeResponse(false, null, "Generation cancelled."));
+        } catch (OpenAIClientException e) {
+            log.error("Recipe generation OpenAI error for {}", ClientIpResolver.resolve(httpRequest), e);
+            if (e.isUnauthorized()) {
+                return ResponseEntity.badRequest()
+                    .body(new RecipeResponse(false, null, "Invalid OpenAI API key. Check your key in .env or the API Key field."));
+            }
+            if (e.isBadRequest()) {
+                return ResponseEntity.internalServerError()
+                    .body(new RecipeResponse(false, null, "Recipe format error. Please try again."));
+            }
+            return ResponseEntity.badRequest()
+                .body(new RecipeResponse(false, null, "OpenAI rejected the request. Check billing or try again."));
         } catch (Exception e) {
-            log.error("Recipe generation failed for {}", getClientIpAddress(httpRequest), e);
-            return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, GENERIC_ERROR));
+            log.error("Recipe generation failed for {}", ClientIpResolver.resolve(httpRequest), e);
+            return ResponseEntity.internalServerError().body(new RecipeResponse(false, null, GENERIC_ERROR));
+        } finally {
+            cancellationService.clear(clientId);
         }
     }
 
     @PostMapping("/get-cooking-tips")
     @ResponseBody
-    public ResponseEntity<RecipeResponse> getCookingTips(@Valid @RequestBody RecipeRequest request, 
+    public ResponseEntity<RecipeResponse> getCookingTips(@Valid @RequestBody RecipeRequest request,
                                                         BindingResult bindingResult,
                                                         HttpSession session,
-                                                        HttpServletRequest httpRequest) {
-        // Check for validation errors
+                                                        HttpServletRequest httpRequest,
+                                                        HttpServletResponse httpResponse) {
         if (bindingResult.hasErrors()) {
-            String errorMessage = bindingResult.getFieldErrors().stream()
-                .map(error -> error.getField() + ": " + error.getDefaultMessage())
-                .findFirst()
-                .orElse("Validation error");
-            return ResponseEntity.badRequest()
-                .body(new RecipeResponse(false, null, errorMessage));
+            return ResponseEntity.badRequest().body(new RecipeResponse(false, null, "Invalid request."));
         }
-        
-        OpenAiKeyService.ResolvedKey resolved = openAiKeyService.resolveKey(session, encryptionService, true);
+
+        String clientId = trialClientService.ensureClientId(httpRequest, httpResponse);
+        OpenAiKeyService.ResolvedKey resolved = openAiKeyService.resolveKey(session, clientId, encryptionService, true);
         if (!resolved.isValid()) {
-            int status = openAiKeyService.isDefaultKeyConfigured() && !openAiKeyService.hasUserKey(session)
-                && openAiKeyService.getDefaultTrialsRemaining(session) == 0 ? 429 : 401;
-            return ResponseEntity.status(status)
-                .body(new RecipeResponse(false, null, resolved.getErrorMessage()));
+            return trialDenied(resolved, clientId, session);
         }
 
         try {
-            String tips = openAIService.getCookingTips(resolved.getApiKey(), request.getIngredients());
+            cancellationService.register(clientId);
+            Runnable checkCancelled = () -> cancellationService.throwIfCancelled(clientId);
+            CookingTipsResult tips = openAIService.getCookingTips(
+                resolved.getApiKey(), request.getIngredients(), checkCancelled);
+            cancellationService.throwIfCancelled(clientId);
             if (resolved.isIncrementTrialOnSuccess()) {
-                openAiKeyService.incrementDefaultRecipeCount(session);
+                openAiKeyService.incrementDefaultRecipeCount(clientId, httpRequest);
             }
-            return ResponseEntity.ok(new RecipeResponse(true, tips, null));
-        } catch (Exception e) {
-            log.error("Cooking tips failed for {}", getClientIpAddress(httpRequest), e);
-            return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, GENERIC_ERROR));
-        }
-    }
-
-    private void populateTrialFields(RecipeResponse response, HttpSession session) {
-        response.setDefaultKeyAvailable(openAiKeyService.isDefaultKeyConfigured());
-        response.setDefaultTrialsRemaining(openAiKeyService.getDefaultTrialsRemaining(session));
-        response.setDefaultRecipesMax(openAiKeyService.getMaxDefaultRecipesPerSession());
-        response.setDefaultRecipesUsed(openAiKeyService.getDefaultRecipesUsed(session));
-    }
-
-    private String sessionUserEmail(HttpSession session) {
-        return "session-" + session.getId() + "@recipeassistant.local";
-    }
-
-    private String getClientIpAddress(HttpServletRequest request) {
-        String xForwardedFor = request.getHeader("X-Forwarded-For");
-        if (xForwardedFor != null && !xForwardedFor.isEmpty() && !"unknown".equalsIgnoreCase(xForwardedFor)) {
-            return xForwardedFor.split(",")[0].trim();
-        }
-        
-        String xRealIp = request.getHeader("X-Real-IP");
-        if (xRealIp != null && !xRealIp.isEmpty() && !"unknown".equalsIgnoreCase(xRealIp)) {
-            return xRealIp;
-        }
-        
-        return request.getRemoteAddr();
-    }
-    
-    // Database API Endpoints
-    
-    @PostMapping("/save-recipe")
-    @ResponseBody
-    public ResponseEntity<RecipeResponse> saveRecipe(@Valid @RequestBody SaveRecipeRequest request,
-                                                   BindingResult bindingResult,
-                                                   HttpSession session,
-                                                   HttpServletRequest httpRequest) {
-        if (bindingResult.hasErrors()) {
-            String errorMessage = bindingResult.getFieldErrors().stream()
-                .map(error -> error.getDefaultMessage())
-                .findFirst()
-                .orElse("Invalid recipe data");
+            RecipeResponse body = new RecipeResponse(true, null, null);
+            body.setCookingTips(tips);
+            body.setKeySource(resolved.getSource().name().toLowerCase());
+            populateTrialFields(body, clientId);
+            return ResponseEntity.ok(body);
+        } catch (GenerationCancelledException e) {
+            return ResponseEntity.status(499)
+                .body(new RecipeResponse(false, null, "Generation cancelled."));
+        } catch (OpenAIClientException e) {
+            log.error("Cooking tips OpenAI error for {}", ClientIpResolver.resolve(httpRequest), e);
+            if (e.isUnauthorized()) {
+                return ResponseEntity.badRequest()
+                    .body(new RecipeResponse(false, null, "Invalid OpenAI API key. Check your key in .env or the API Key field."));
+            }
             return ResponseEntity.badRequest()
-                .body(new RecipeResponse(false, null, errorMessage));
-        }
-        try {
-            String userEmail = sessionUserEmail(session);
-            
-            // Extract recipe title from the content (simple extraction)
-            String title = extractRecipeTitle(request.getContent());
-            
-            // Save recipe to database
-            databaseService.saveRecipe(
-                title,
-                request.getContent(),
-                request.getIngredients(),
-                request.getCuisine(),
-                request.getDietaryRestrictions(),
-                userEmail
-            );
-            
-            securityAuditService.logRecipeGeneration(getClientIpAddress(httpRequest), request.getIngredients());
-            return ResponseEntity.ok(new RecipeResponse(true, "Recipe saved to database successfully!", null));
+                .body(new RecipeResponse(false, null, "OpenAI rejected the request. Check billing or try again."));
         } catch (Exception e) {
-            log.error("Save recipe failed", e);
-            return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, GENERIC_ERROR));
+            log.error("Cooking tips failed for {}", ClientIpResolver.resolve(httpRequest), e);
+            return ResponseEntity.internalServerError().body(new RecipeResponse(false, null, GENERIC_ERROR));
+        } finally {
+            cancellationService.clear(clientId);
         }
     }
-    
-    @GetMapping("/get-user-recipes")
-    @ResponseBody
-    public ResponseEntity<RecipeResponse> getUserRecipes(HttpSession session) {
-        try {
-            String userEmail = sessionUserEmail(session);
-            var recipes = databaseService.getUserRecipes(userEmail);
-            
-            // Convert recipes to a simple format for frontend
-            StringBuilder recipesList = new StringBuilder();
-            for (var recipe : recipes) {
-                recipesList.append("Recipe: ").append(recipe.getTitle()).append("\n");
-                recipesList.append("Cuisine: ").append(recipe.getCuisine()).append("\n");
-                recipesList.append("Created: ").append(recipe.getCreatedAt()).append("\n\n");
-            }
-            
-            return ResponseEntity.ok(new RecipeResponse(true, recipesList.toString(), null));
-        } catch (Exception e) {
-            log.error("Get user recipes failed", e);
-            return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, GENERIC_ERROR));
-        }
-    }
-    
-    @GetMapping("/database-status")
-    @ResponseBody
-    public ResponseEntity<RecipeResponse> getDatabaseStatus(HttpSession session) {
-        try {
-            String userEmail = sessionUserEmail(session);
-            var stats = databaseService.getUserStats(userEmail);
 
-            return ResponseEntity.ok(new RecipeResponse(true,
-                "Database connected. Your recipes: " + stats.get("totalRecipes")
-                    + ", favorites: " + stats.get("favoriteRecipes"), null));
-        } catch (Exception e) {
-            log.error("Database status check failed", e);
-            return ResponseEntity.status(503)
-                .body(new RecipeResponse(false, null, "Database unavailable."));
-        }
+    private RecipeResponse buildRecipeSuccess(StructuredRecipe recipe, OpenAiKeyService.ResolvedKey resolved,
+                                              String clientId, HttpSession session) {
+        RecipeResponse body = new RecipeResponse(true, openAIService.recipeToPlainText(recipe), null);
+        body.setRecipe(recipe);
+        body.setContentHash(ContentHashUtil.sha256(openAIService.recipeToJson(recipe)));
+        body.setKeySource(resolved.getSource().name().toLowerCase());
+        body.setHasUserKey(openAiKeyService.hasUserKey(session));
+        populateTrialFields(body, clientId);
+        body.setTrialDeviceNotice(TRIAL_DEVICE_NOTICE);
+        return body;
     }
-    
-    @GetMapping("/get-user-favorites")
-    @ResponseBody
-    public ResponseEntity<RecipeResponse> getUserFavorites(HttpSession session) {
-        try {
-            String userEmail = sessionUserEmail(session);
-            var favorites = databaseService.getUserFavorites(userEmail);
-            
-            // Convert favorites to a simple format for frontend
-            StringBuilder favoritesList = new StringBuilder();
-            for (var recipe : favorites) {
-                favoritesList.append("Favorite: ").append(recipe.getTitle()).append("\n");
-                favoritesList.append("Cuisine: ").append(recipe.getCuisine()).append("\n");
-                favoritesList.append("Created: ").append(recipe.getCreatedAt()).append("\n\n");
-            }
-            
-            return ResponseEntity.ok(new RecipeResponse(true, favoritesList.toString(), null));
-        } catch (Exception e) {
-            log.error("Get favorites failed", e);
-            return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, GENERIC_ERROR));
-        }
-    }
-    
-    @PostMapping("/add-to-favorites")
-    @ResponseBody
-    public ResponseEntity<RecipeResponse> addToFavorites(@Valid @RequestBody FavoriteRequest request,
-                                                       BindingResult bindingResult,
+
+    private ResponseEntity<RecipeResponse> trialDenied(OpenAiKeyService.ResolvedKey resolved, String clientId,
                                                        HttpSession session) {
-        if (bindingResult.hasErrors()) {
-            return ResponseEntity.badRequest()
-                .body(new RecipeResponse(false, null, "Invalid recipe id"));
-        }
-        try {
-            String userEmail = sessionUserEmail(session);
-            UUID recipeId = UUID.fromString(request.getRecipeId());
-            boolean success = databaseService.addToFavorites(recipeId, userEmail);
-            
-            if (success) {
-                return ResponseEntity.ok(new RecipeResponse(true, "Recipe added to favorites!", null));
-            } else {
-                return ResponseEntity.badRequest()
-                    .body(new RecipeResponse(false, null, "Recipe not found or already favorited"));
-            }
-        } catch (Exception e) {
-            log.error("Add to favorites failed", e);
-            return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, GENERIC_ERROR));
-        }
+        int status = openAiKeyService.isDefaultKeyConfigured() && !openAiKeyService.hasUserKey(session)
+            && openAiKeyService.getDefaultTrialsRemaining(clientId) == 0 ? 429 : 401;
+        RecipeResponse body = new RecipeResponse(false, null, resolved.getErrorMessage());
+        populateTrialFields(body, clientId);
+        body.setTrialDeviceNotice(TRIAL_DEVICE_NOTICE);
+        return ResponseEntity.status(status).body(body);
     }
-    
-    @PostMapping("/remove-from-favorites")
-    @ResponseBody
-    public ResponseEntity<RecipeResponse> removeFromFavorites(@Valid @RequestBody FavoriteRequest request,
-                                                            BindingResult bindingResult,
-                                                            HttpSession session) {
-        if (bindingResult.hasErrors()) {
-            return ResponseEntity.badRequest()
-                .body(new RecipeResponse(false, null, "Invalid recipe id"));
-        }
-        try {
-            String userEmail = sessionUserEmail(session);
-            UUID recipeId = UUID.fromString(request.getRecipeId());
-            boolean success = databaseService.removeFromFavorites(recipeId, userEmail);
-            
-            if (success) {
-                return ResponseEntity.ok(new RecipeResponse(true, "Recipe removed from favorites!", null));
-            } else {
-                return ResponseEntity.badRequest()
-                    .body(new RecipeResponse(false, null, "Recipe not found in favorites"));
-            }
-        } catch (Exception e) {
-            log.error("Remove from favorites failed", e);
-            return ResponseEntity.internalServerError()
-                .body(new RecipeResponse(false, null, GENERIC_ERROR));
-        }
+
+    private void populateTrialFields(RecipeResponse response, String clientId) {
+        response.setDefaultKeyAvailable(openAiKeyService.isDefaultKeyConfigured());
+        response.setDefaultTrialsRemaining(openAiKeyService.getDefaultTrialsRemaining(clientId));
+        response.setDefaultRecipesMax(openAiKeyService.getMaxDefaultRecipesPerSession());
+        response.setDefaultRecipesUsed(openAiKeyService.getDefaultRecipesUsed(clientId));
     }
-    
-    // Helper method to extract recipe title
-    private String extractRecipeTitle(String content) {
-        if (content == null || content.trim().isEmpty()) {
-            return "Untitled Recipe";
-        }
-        
-        String[] lines = content.split("\n");
-        for (String line : lines) {
-            line = line.trim();
-            if (!line.isEmpty() && 
-                !line.toLowerCase().contains("ingredients") && 
-                !line.toLowerCase().contains("instructions") && 
-                !line.toLowerCase().contains("prep time") && 
-                !line.toLowerCase().contains("cook time") && 
-                !line.toLowerCase().contains("servings")) {
-                return line.length() > 50 ? line.substring(0, 50) + "..." : line;
-            }
-        }
-        return "Untitled Recipe";
+
+    private String validationMessage(BindingResult bindingResult) {
+        return bindingResult.getFieldErrors().stream()
+            .map(error -> error.getDefaultMessage())
+            .findFirst()
+            .orElse("Invalid request");
     }
 }
