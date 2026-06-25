@@ -103,9 +103,10 @@ spring.datasource.password=recipe_password
 spring.datasource.driver-class-name=org.postgresql.Driver
 
 # JPA/Hibernate Configuration
-spring.jpa.hibernate.ddl-auto=update
-spring.jpa.show-sql=true
-spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
+spring.jpa.hibernate.ddl-auto=validate
+
+# Schema is managed by Flyway (src/main/resources/db/migration/)
+spring.flyway.baseline-on-migrate=true
 ```
 
 ## Step 7: Run the Application
@@ -134,35 +135,21 @@ The application will create the following tables:
 ### Recipes Table
 - `id` (UUID, Primary Key)
 - `user_id` (UUID, Foreign Key to Users)
-- `title` (VARCHAR)
-- `ingredients` (JSONB)
-- `instructions` (TEXT)
-- `cuisine` (VARCHAR)
-- `dietary_restrictions` (JSONB)
-- `prep_time` (INTEGER)
-- `cook_time` (INTEGER)
-- `servings` (INTEGER)
-- `is_favorite` (BOOLEAN)
-- `created_at` (TIMESTAMP)
-- `updated_at` (TIMESTAMP)
+- `client_id` on users links library to device cookie (`ra_client_id`)
+- `title`, `ingredients`, `instructions` (structured recipe JSON), `cuisine`, `dietary_restrictions`
+- `content_hash` (dedupe), `created_at`, `updated_at`
 
-### User Favorites Table
-- `id` (UUID, Primary Key)
-- `user_id` (UUID, Foreign Key to Users)
-- `recipe_id` (UUID, Foreign Key to Recipes)
-- `created_at` (TIMESTAMP)
+### Collections
+- `collections` — cookbook shelves (system: **My Recipes**, **Saved**; plus user-created)
+- `collection_recipes` — many-to-many with ordering
 
 ## Features Enabled
 
-With the database integration, you now have:
+- Persistent recipe library per device (PostgreSQL)
+- Collection / cookbook UI
+- Trial usage tracking (`trial_client_usage`)
 
-- ✅ **Persistent Recipe Storage** - Recipes saved to database
-- ✅ **User Management** - User accounts and sessions
-- ✅ **Favorites System** - Database-backed favorites
-- ✅ **Search Capabilities** - Full-text search on recipes
-- ✅ **Data Analytics** - User statistics and recipe counts
-- ✅ **Multi-user Support** - Each user has their own recipes
-- ✅ **Data Integrity** - ACID compliance and relationships
+Legacy tables `user_favorites` and `recipes.is_favorite` are unused; safe to drop manually if present.
 
 ## Troubleshooting
 
@@ -185,11 +172,8 @@ With the database integration, you now have:
 
 After database setup, you can:
 
-1. **Migrate from localStorage** - Move existing favorites to database
-2. **Add user authentication** - Implement login/signup system
-3. **Enable recipe sharing** - Allow users to share recipes
-4. **Add advanced search** - Implement full-text search
-5. **Create admin panel** - Manage users and recipes
+1. **Deploy to Railway** — see `RAILWAY.md`
+2. **Add user authentication** — cross-device library (optional)
 
 ## Security Notes
 
